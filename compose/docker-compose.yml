@@ -54,7 +54,7 @@ services:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - minio_data:/data
+      - E:/s3-data:/data
 
   nessie:
     image: ghcr.io/projectnessie/nessie:0.106.0
@@ -138,6 +138,6 @@ volumes:
   pg_primary_data:
   pg_replica1_data:
   pg_replica2_data:
-  minio_data:
+  # minio_data:
   clickhouse_data:
   trino_exchange:
