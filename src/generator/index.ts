@@ -56,3 +56,9 @@ export {
 } from "./clickhouse-generator.js";
 export { SQLiteDataGenerator, type SQLiteConfig } from "./sqlite-generator.js";
 export { TrinoDataGenerator, type TrinoConfig } from "./trino-generator.js";
+export { HybridDataGenerator } from "./hybrid-generator.js";
+export { HybridDataGeneratorV2 } from "./hybrid-generator-v2.js";
+export type {
+  HybridGeneratorConfig,
+  HybridGeneratorConfigV2,
+} from "./hybrid-types.js";

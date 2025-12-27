@@ -13,9 +13,13 @@ import {
   ClickHouseDataGenerator,
   SQLiteDataGenerator,
   TrinoDataGenerator,
+  HybridDataGenerator,
+  HybridDataGeneratorV2,
   formatDuration,
   type DataGenerator,
   type Scenario,
+  type HybridGeneratorConfig,
+  type HybridGeneratorConfigV2,
 } from "../src/generator/index.js";
 
 // Usage:
@@ -48,6 +52,7 @@ const SCENARIO_NAMES = [
   "english-names",
   "russian-names",
   "lookup-demo",
+  "bonus-registry",
 ] as const;
 type ScenarioName = (typeof SCENARIO_NAMES)[number];
 
@@ -60,6 +65,8 @@ const { values } = parseArgs({
     postgres: { type: "boolean", default: false },
     clickhouse: { type: "boolean", default: false },
     trino: { type: "boolean", default: false },
+    hybrid: { type: "boolean", default: false },
+    hybridV2: { type: "boolean", default: false },
     help: { type: "boolean", short: "h", default: false },
   },
 });
@@ -76,6 +83,8 @@ Options:
   --postgres             Generate for PostgreSQL only
   --clickhouse           Generate for ClickHouse only
   --trino                Generate for Trino only
+  --hybrid               Generate for Hybrid (PostgreSQL + Trino via external table)
+  --hybridV2             Generate for Hybrid V2 (PostgreSQL + Trino, optimized with Saga batches)
   -h, --help             Show this help message
 
 Scenarios:
@@ -413,6 +422,322 @@ function getScenarioConfig(scenario: ScenarioName, rowCount: number): Scenario {
           },
         ],
       };
+
+    case "bonus-registry":
+      return {
+        name: "Bonus Registry (PostgreSQL + Trino hybrid)",
+        description:
+          "Bonus registry scenario for hybrid generators: PostgreSQL table with registrar data, Trino table with full bonus registry data",
+        steps: [
+          {
+            table: {
+              name: "bonus_registry",
+              description: "Bonus registry table (PostgreSQL: registrar fields, Trino: full data)",
+              columns: [
+                // Поля для PostgreSQL (основные)
+                {
+                  name: "id",
+                  type: "string",
+                  generator: { kind: "uuid" },
+                },
+                {
+                  name: "registrar_type_id",
+                  type: "string",
+                  generator: {
+                    kind: "choice",
+                    values: ["TYPE_1", "TYPE_2", "TYPE_3", "TYPE_4", "TYPE_5"],
+                  },
+                },
+                {
+                  name: "registrar_id",
+                  type: "string",
+                  generator: { kind: "randomString", length: 10 },
+                },
+                {
+                  name: "row",
+                  type: "integer",
+                  generator: { kind: "randomInt", min: 1, max: 1000 },
+                },
+                {
+                  name: "amount",
+                  type: "float",
+                  generator: {
+                    kind: "randomFloat",
+                    min: 0,
+                    max: 10000,
+                    precision: 2,
+                  },
+                },
+                {
+                  name: "created_at",
+                  type: "datetime",
+                  generator: { kind: "datetime" },
+                },
+                // Поля для Trino (дополнительные)
+                {
+                  name: "date",
+                  type: "datetime",
+                  generator: { kind: "datetime" },
+                },
+                {
+                  name: "manager_id",
+                  type: "integer",
+                  generator: { kind: "randomInt", min: 1, max: 1000 },
+                },
+                {
+                  name: "bs_profile_id",
+                  type: "string",
+                  generator: { kind: "randomString", length: 10 },
+                },
+                {
+                  name: "accounted_for_bs_profile_id",
+                  type: "string",
+                  generator: { kind: "randomString", length: 10 },
+                },
+                {
+                  name: "first_name",
+                  type: "string",
+                  generator: {
+                    kind: "choiceByLookup",
+                    values: ENGLISH_FIRST_NAMES,
+                  },
+                },
+                {
+                  name: "first_name_latin",
+                  type: "string",
+                  generator: {
+                    kind: "choiceByLookup",
+                    values: ENGLISH_FIRST_NAMES,
+                  },
+                },
+                {
+                  name: "last_name",
+                  type: "string",
+                  generator: {
+                    kind: "choiceByLookup",
+                    values: ENGLISH_LAST_NAMES,
+                  },
+                },
+                {
+                  name: "last_name_latin",
+                  type: "string",
+                  generator: {
+                    kind: "choiceByLookup",
+                    values: ENGLISH_LAST_NAMES,
+                  },
+                },
+                {
+                  name: "departure_id",
+                  type: "integer",
+                  generator: { kind: "randomInt", min: 1, max: 100 },
+                },
+                {
+                  name: "arrival_id",
+                  type: "integer",
+                  generator: { kind: "randomInt", min: 1, max: 100 },
+                },
+                {
+                  name: "departure_date",
+                  type: "date",
+                  generator: { kind: "datetime" },
+                },
+                {
+                  name: "currency_entry_id",
+                  type: "integer",
+                  generator: { kind: "randomInt", min: 1, max: 10 },
+                },
+                {
+                  name: "bonus_type_id",
+                  type: "string",
+                  generator: { kind: "randomString", length: 8 },
+                },
+                {
+                  name: "action_source_id",
+                  type: "string",
+                  generator: { kind: "randomString", length: 8 },
+                },
+                {
+                  name: "bs_bonus_ticket_id",
+                  type: "string",
+                  generator: { kind: "randomString", length: 12 },
+                },
+                {
+                  name: "validity_time",
+                  type: "integer",
+                  generator: { kind: "randomInt", min: 30, max: 365 },
+                },
+                {
+                  name: "date_of_expire",
+                  type: "date",
+                  generator: { kind: "datetime" },
+                },
+                {
+                  name: "car_type_id",
+                  type: "string",
+                  generator: { kind: "randomString", length: 5 },
+                },
+                {
+                  name: "express_carrier_id",
+                  type: "integer",
+                  generator: { kind: "randomInt", min: 1, max: 50 },
+                },
+                {
+                  name: "carrier_id",
+                  type: "string",
+                  generator: { kind: "randomString", length: 8 },
+                },
+                {
+                  name: "bs_partner_id",
+                  type: "integer",
+                  generator: { kind: "randomInt", min: 1, max: 100 },
+                },
+                {
+                  name: "bs_train_number_id",
+                  type: "string",
+                  generator: { kind: "randomString", length: 10 },
+                },
+                {
+                  name: "bs_tourism_train_id",
+                  type: "string",
+                  generator: { kind: "randomString", length: 10 },
+                },
+                {
+                  name: "accounted_in_calculation",
+                  type: "boolean",
+                  generator: {
+                    kind: "choice",
+                    values: [true, false],
+                  },
+                },
+                {
+                  name: "cancelled",
+                  type: "boolean",
+                  generator: {
+                    kind: "choice",
+                    values: [true, false],
+                  },
+                },
+                {
+                  name: "bs_quota_id",
+                  type: "integer",
+                  generator: { kind: "randomInt", min: 1, max: 1000 },
+                },
+                {
+                  name: "doc_to_track_type_id",
+                  type: "string",
+                  generator: { kind: "randomString", length: 5 },
+                },
+                {
+                  name: "doc_to_track_id",
+                  type: "string",
+                  generator: { kind: "randomString", length: 10 },
+                },
+                {
+                  name: "doc_to_track_date",
+                  type: "date",
+                  generator: { kind: "datetime" },
+                },
+                {
+                  name: "active_date",
+                  type: "date",
+                  generator: { kind: "datetime" },
+                },
+                {
+                  name: "trip_for_another_person",
+                  type: "boolean",
+                  generator: {
+                    kind: "choice",
+                    values: [true, false],
+                  },
+                },
+                {
+                  name: "ticket_number",
+                  type: "string",
+                  generator: { kind: "randomString", length: 15 },
+                },
+                {
+                  name: "currency_amount",
+                  type: "integer",
+                  generator: { kind: "randomInt", min: 100, max: 10000 },
+                },
+                {
+                  name: "bs_partner_bonus_type_id",
+                  type: "string",
+                  generator: { kind: "randomString", length: 8 },
+                },
+                {
+                  name: "express_service_class_id",
+                  type: "integer",
+                  generator: { kind: "randomInt", min: 1, max: 5 },
+                },
+                {
+                  name: "date_to_cancelled",
+                  type: "datetime",
+                  generator: { kind: "datetime" },
+                },
+                {
+                  name: "prolongable",
+                  type: "boolean",
+                  generator: {
+                    kind: "choice",
+                    values: [true, false],
+                  },
+                },
+                {
+                  name: "active_by_trips",
+                  type: "boolean",
+                  generator: {
+                    kind: "choice",
+                    values: [true, false],
+                  },
+                },
+                {
+                  name: "is_empty",
+                  type: "boolean",
+                  generator: {
+                    kind: "choice",
+                    values: [true, false],
+                  },
+                },
+                {
+                  name: "amount_calculation",
+                  type: "string",
+                  generator: { kind: "randomString", length: 20 },
+                },
+                {
+                  name: "distance",
+                  type: "integer",
+                  generator: { kind: "randomInt", min: 100, max: 5000 },
+                },
+                {
+                  name: "addition_amount",
+                  type: "integer",
+                  generator: { kind: "randomInt", min: 0, max: 1000 },
+                },
+                {
+                  name: "operation_doc_type_id",
+                  type: "string",
+                  generator: { kind: "randomString", length: 5 },
+                },
+                {
+                  name: "is_merged",
+                  type: "boolean",
+                  generator: {
+                    kind: "choice",
+                    values: [true, false],
+                  },
+                },
+                {
+                  name: "merged_date",
+                  type: "date",
+                  generator: { kind: "datetime" },
+                },
+              ],
+            },
+            rowCount,
+          },
+        ],
+      };
   }
 }
 
@@ -425,7 +750,7 @@ interface GeneratorEntry {
 }
 
 function createGenerators(): GeneratorEntry[] {
-  return [
+  const generators: GeneratorEntry[] = [
     {
       name: "SQLite",
       flag: "sqlite",
@@ -465,6 +790,198 @@ function createGenerators(): GeneratorEntry[] {
       }),
     },
   ];
+
+  // Функция для создания маппинга колонок на основе сценария
+  function createColumnMapping(
+    scenario: ScenarioName
+  ): {
+    postgresColumnMapping: HybridGeneratorConfig["postgresColumnMapping"];
+    trinoColumnMapping: HybridGeneratorConfig["trinoColumnMapping"];
+  } {
+    switch (scenario) {
+      case "simple": {
+        return {
+          postgresColumnMapping: [
+            { sourceColumn: "id", targetColumn: "id" },
+            { sourceColumn: "name", targetColumn: "name" },
+            { sourceColumn: "value", targetColumn: "value" },
+            { sourceColumn: "status", targetColumn: "status" },
+            { sourceColumn: "created_at", targetColumn: "created_at" },
+          ],
+          trinoColumnMapping: [
+            { sourceColumn: "id", targetColumn: "id" },
+            { sourceColumn: "name", targetColumn: "name" },
+            { sourceColumn: "value", targetColumn: "value" },
+            { sourceColumn: "status", targetColumn: "status" },
+            { sourceColumn: "created_at", targetColumn: "created_at" },
+          ],
+        };
+      }
+      case "english-names":
+      case "russian-names": {
+        return {
+          postgresColumnMapping: [
+            { sourceColumn: "id", targetColumn: "id" },
+            { sourceColumn: "first_name", targetColumn: "first_name" },
+            { sourceColumn: "last_name", targetColumn: "last_name" },
+            { sourceColumn: "email", targetColumn: "email" },
+            { sourceColumn: "score", targetColumn: "score" },
+            { sourceColumn: "status", targetColumn: "status" },
+            { sourceColumn: "created_at", targetColumn: "created_at" },
+          ],
+          trinoColumnMapping: [
+            { sourceColumn: "id", targetColumn: "id" },
+            { sourceColumn: "first_name", targetColumn: "first_name" },
+            { sourceColumn: "last_name", targetColumn: "last_name" },
+            { sourceColumn: "email", targetColumn: "email" },
+            { sourceColumn: "score", targetColumn: "score" },
+            { sourceColumn: "status", targetColumn: "status" },
+            { sourceColumn: "created_at", targetColumn: "created_at" },
+          ],
+        };
+      }
+      case "lookup-demo": {
+        // Для lookup-demo используем employees таблицу
+        return {
+          postgresColumnMapping: [
+            { sourceColumn: "id", targetColumn: "id" },
+            { sourceColumn: "first_name", targetColumn: "first_name" },
+            { sourceColumn: "last_name", targetColumn: "last_name" },
+            { sourceColumn: "department_id", targetColumn: "department_id" },
+            { sourceColumn: "department_name", targetColumn: "department_name" },
+            { sourceColumn: "salary", targetColumn: "salary" },
+            { sourceColumn: "hire_date", targetColumn: "hire_date" },
+          ],
+          trinoColumnMapping: [
+            { sourceColumn: "id", targetColumn: "id" },
+            { sourceColumn: "first_name", targetColumn: "first_name" },
+            { sourceColumn: "last_name", targetColumn: "last_name" },
+            { sourceColumn: "department_id", targetColumn: "department_id" },
+            { sourceColumn: "department_name", targetColumn: "department_name" },
+            { sourceColumn: "salary", targetColumn: "salary" },
+            { sourceColumn: "hire_date", targetColumn: "hire_date" },
+          ],
+        };
+      }
+      case "bonus-registry": {
+        // PostgreSQL: только основные поля для регистрации
+        // Trino: все поля включая дополнительные
+        return {
+          postgresColumnMapping: [
+            { sourceColumn: "id", targetColumn: "id" },
+            { sourceColumn: "registrar_type_id", targetColumn: "registrar_type_id" },
+            { sourceColumn: "registrar_id", targetColumn: "registrar_id" },
+            { sourceColumn: "row", targetColumn: "row" },
+            { sourceColumn: "amount", targetColumn: "amount" },
+            { sourceColumn: "created_at", targetColumn: "createdAt" },
+          ],
+          trinoColumnMapping: [
+            // Поля из PostgreSQL
+            { sourceColumn: "id", targetColumn: "id" },
+            { sourceColumn: "date", targetColumn: "date" },
+            { sourceColumn: "registrar_type_id", targetColumn: "registrar_type_id" },
+            { sourceColumn: "registrar_id", targetColumn: "registrar_id" },
+            { sourceColumn: "row", targetColumn: "row" },
+            { sourceColumn: "amount", targetColumn: "amount" },
+            // Дополнительные поля для Trino
+            { sourceColumn: "manager_id", targetColumn: "manager_id" },
+            { sourceColumn: "bs_profile_id", targetColumn: "bs_profile_id" },
+            { sourceColumn: "accounted_for_bs_profile_id", targetColumn: "accounted_for_bs_profile_id" },
+            { sourceColumn: "first_name", targetColumn: "first_name" },
+            { sourceColumn: "first_name_latin", targetColumn: "first_name_latin" },
+            { sourceColumn: "last_name", targetColumn: "last_name" },
+            { sourceColumn: "last_name_latin", targetColumn: "last_name_latin" },
+            { sourceColumn: "departure_id", targetColumn: "departure_id" },
+            { sourceColumn: "arrival_id", targetColumn: "arrival_id" },
+            { sourceColumn: "departure_date", targetColumn: "departure_date" },
+            { sourceColumn: "currency_entry_id", targetColumn: "currency_entry_id" },
+            { sourceColumn: "bonus_type_id", targetColumn: "bonus_type_id" },
+            { sourceColumn: "action_source_id", targetColumn: "action_source_id" },
+            { sourceColumn: "bs_bonus_ticket_id", targetColumn: "bs_bonus_ticket_id" },
+            { sourceColumn: "validity_time", targetColumn: "validity_time" },
+            { sourceColumn: "date_of_expire", targetColumn: "date_of_expire" },
+            { sourceColumn: "car_type_id", targetColumn: "car_type_id" },
+            { sourceColumn: "express_carrier_id", targetColumn: "express_carrier_id" },
+            { sourceColumn: "carrier_id", targetColumn: "carrier_id" },
+            { sourceColumn: "bs_partner_id", targetColumn: "bs_partner_id" },
+            { sourceColumn: "bs_train_number_id", targetColumn: "bs_train_number_id" },
+            { sourceColumn: "bs_tourism_train_id", targetColumn: "bs_tourism_train_id" },
+            { sourceColumn: "accounted_in_calculation", targetColumn: "accounted_in_calculation" },
+            { sourceColumn: "cancelled", targetColumn: "cancelled" },
+            { sourceColumn: "bs_quota_id", targetColumn: "bs_quota_id" },
+            { sourceColumn: "doc_to_track_type_id", targetColumn: "doc_to_track_type_id" },
+            { sourceColumn: "doc_to_track_id", targetColumn: "doc_to_track_id" },
+            { sourceColumn: "doc_to_track_date", targetColumn: "doc_to_track_date" },
+            { sourceColumn: "active_date", targetColumn: "active_date" },
+            { sourceColumn: "trip_for_another_person", targetColumn: "trip_for_another_person" },
+            { sourceColumn: "ticket_number", targetColumn: "ticket_number" },
+            { sourceColumn: "currency_amount", targetColumn: "currency_amount" },
+            { sourceColumn: "bs_partner_bonus_type_id", targetColumn: "bs_partner_bonus_type_id" },
+            { sourceColumn: "express_service_class_id", targetColumn: "express_service_class_id" },
+            { sourceColumn: "date_to_cancelled", targetColumn: "date_to_cancelled" },
+            { sourceColumn: "prolongable", targetColumn: "prolongable" },
+            { sourceColumn: "active_by_trips", targetColumn: "active_by_trips" },
+            { sourceColumn: "is_empty", targetColumn: "is_empty" },
+            { sourceColumn: "amount_calculation", targetColumn: "amount_calculation" },
+            { sourceColumn: "distance", targetColumn: "distance" },
+            { sourceColumn: "addition_amount", targetColumn: "addition_amount" },
+            { sourceColumn: "operation_doc_type_id", targetColumn: "operation_doc_type_id" },
+            { sourceColumn: "is_merged", targetColumn: "is_merged" },
+            { sourceColumn: "merged_date", targetColumn: "merged_date" },
+          ],
+        };
+      }
+      default: {
+        // По умолчанию используем simple
+        return createColumnMapping("simple");
+      }
+    }
+  }
+
+  // Гибридный генератор (вариант 1: через внешнюю таблицу)
+  // Для гибридных генераторов всегда используем bonus-registry сценарий
+  const hybridScenario: ScenarioName = "bonus-registry";
+  const columnMapping = createColumnMapping(hybridScenario);
+  const hybridConfig: HybridGeneratorConfig = {
+    postgresConfig: {
+      host: "localhost",
+      port: 5432,
+      database: "appdb",
+      username: "postgres",
+      password: "postgres",
+    },
+    trinoConfig: {
+      host: "localhost",
+      port: 8080,
+      catalog: "iceberg",
+      schema: "warehouse",
+      user: "trino",
+    },
+    postgresColumnMapping: columnMapping.postgresColumnMapping,
+    trinoColumnMapping: columnMapping.trinoColumnMapping,
+    postgresTableName: "BonusRegistryUniqueAndBalanceCheck",
+    trinoTableName: "bonus_registry",
+  };
+
+  generators.push({
+    name: "Hybrid (PostgreSQL + Trino)",
+    flag: "hybrid",
+    generator: new HybridDataGenerator(hybridConfig),
+  });
+
+  // Гибридный генератор (вариант 2: Saga с оптимизацией)
+  const hybridConfigV2: HybridGeneratorConfigV2 = {
+    ...hybridConfig,
+    sagaBatchSize: 100000, // 100K строк на сагу
+  };
+
+  generators.push({
+    name: "Hybrid V2 (PostgreSQL + Trino, optimized)",
+    flag: "hybridV2",
+    generator: new HybridDataGeneratorV2(hybridConfigV2),
+  });
+
+  return generators;
 }
 
 async function generateForDatabase(entry: GeneratorEntry): Promise<void> {
@@ -475,8 +992,14 @@ async function generateForDatabase(entry: GeneratorEntry): Promise<void> {
     await generator.connect();
     console.log(`Connected to ${name}`);
 
+    // Для гибридных генераторов используем bonus-registry сценарий
+    const scenarioToUse =
+      entry.flag === "hybrid" || entry.flag === "hybridV2"
+        ? getScenarioConfig("bonus-registry", ROW_COUNT)
+        : scenarioConfig;
+
     const result = await generator.runScenario({
-      scenario: scenarioConfig,
+      scenario: scenarioToUse,
       dropFirst: true,
       batchSize: BATCH_SIZE,
     });
