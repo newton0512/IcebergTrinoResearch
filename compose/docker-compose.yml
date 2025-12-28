@@ -91,6 +91,7 @@ services:
       - ./trino-fte/jvm.config:/etc/trino/jvm.config:ro
       - ./trino-fte/exchange-manager.properties:/etc/trino/exchange-manager.properties:ro
       - ./trino-fte/catalog/iceberg.properties:/etc/trino/catalog/iceberg.properties:ro
+      - ./trino-fte/catalog/postgres.properties:/etc/trino/catalog/postgres.properties:ro
     deploy:
       resources:
         limits:

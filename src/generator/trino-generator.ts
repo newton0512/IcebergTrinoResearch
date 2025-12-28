@@ -21,7 +21,7 @@ export interface TrinoConfig {
   user: string;
 }
 
-function columnTypeToTrino(column: ColumnConfig): string {
+export function columnTypeToTrino(column: ColumnConfig): string {
   switch (column.type) {
     case "integer":
       return "INTEGER";

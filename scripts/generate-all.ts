@@ -15,11 +15,13 @@ import {
   TrinoDataGenerator,
   HybridDataGenerator,
   HybridDataGeneratorV2,
+  HybridDataGeneratorV3,
   formatDuration,
   type DataGenerator,
   type Scenario,
   type HybridGeneratorConfig,
   type HybridGeneratorConfigV2,
+  type HybridGeneratorConfigV3,
 } from "../src/generator/index.js";
 
 // Usage:
@@ -67,6 +69,7 @@ const { values } = parseArgs({
     trino: { type: "boolean", default: false },
     hybrid: { type: "boolean", default: false },
     hybridV2: { type: "boolean", default: false },
+    hybridV3: { type: "boolean", default: false },
     help: { type: "boolean", short: "h", default: false },
   },
 });
@@ -85,6 +88,7 @@ Options:
   --trino                Generate for Trino only
   --hybrid               Generate for Hybrid (PostgreSQL + Trino via external table)
   --hybridV2             Generate for Hybrid V2 (PostgreSQL + Trino, optimized with Saga batches)
+  --hybridV3             Generate for Hybrid V3 (PostgreSQL lookup + Trino SQL generation with CROSS JOIN)
   -h, --help             Show this help message
 
 Scenarios:
@@ -883,6 +887,7 @@ function createGenerators(): GeneratorEntry[] {
             { sourceColumn: "registrar_id", targetColumn: "registrar_id" },
             { sourceColumn: "row", targetColumn: "row" },
             { sourceColumn: "amount", targetColumn: "amount" },
+            { sourceColumn: "created_at", targetColumn: "created_at" },
             // Дополнительные поля для Trino
             { sourceColumn: "manager_id", targetColumn: "manager_id" },
             { sourceColumn: "bs_profile_id", targetColumn: "bs_profile_id" },
@@ -959,7 +964,7 @@ function createGenerators(): GeneratorEntry[] {
     },
     postgresColumnMapping: columnMapping.postgresColumnMapping,
     trinoColumnMapping: columnMapping.trinoColumnMapping,
-    postgresTableName: "BonusRegistryUniqueAndBalanceCheck",
+    postgresTableName: "bonus_registry_lookup",
     trinoTableName: "bonus_registry",
   };
 
@@ -981,6 +986,21 @@ function createGenerators(): GeneratorEntry[] {
     generator: new HybridDataGeneratorV2(hybridConfigV2),
   });
 
+  // Гибридный генератор (вариант 3: SQL генерация с CROSS JOIN к PostgreSQL)
+  // Используем 3 колонки из PostgreSQL: registrar_type_id, registrar_id, amount
+  const hybridConfigV3: HybridGeneratorConfigV3 = {
+    ...hybridConfig,
+    postgresLookupColumns: ["registrar_type_id", "registrar_id", "amount"],
+    postgresCatalogName: "postgres",
+    sagaBatchSize: 100000, // 100K строк на сагу
+  };
+
+  generators.push({
+    name: "Hybrid V3 (PostgreSQL lookup + Trino SQL)",
+    flag: "hybridV3",
+    generator: new HybridDataGeneratorV3(hybridConfigV3),
+  });
+
   return generators;
 }
 
@@ -994,7 +1014,9 @@ async function generateForDatabase(entry: GeneratorEntry): Promise<void> {
 
     // Для гибридных генераторов используем bonus-registry сценарий
     const scenarioToUse =
-      entry.flag === "hybrid" || entry.flag === "hybridV2"
+      entry.flag === "hybrid" ||
+      entry.flag === "hybridV2" ||
+      entry.flag === "hybridV3"
         ? getScenarioConfig("bonus-registry", ROW_COUNT)
         : scenarioConfig;
 
