@@ -131,21 +131,28 @@ export class SagaManager {
       // Выполняем все операции
       await this.executeOperations();
 
-      // Обновляем статус в БД
-      await this.dbClient`
-        UPDATE "Saga"
-        SET status = ${SagaStatusEnum.COMMITTED}, "updatedAt" = NOW()
-        WHERE id = ${this.sagaId}
-      `;
+      // Сохраняем sagaId перед reset()
+      const sagaId = this.sagaId;
 
       const result: SagaResult = {
-        sagaId: this.sagaId,
+        sagaId,
         status: SagaStatusEnum.COMMITTED,
         operationsCount: this.operations.length,
       };
 
       // Очищаем состояние
       this.reset();
+
+      // Обновляем статус в БД асинхронно (fire-and-forget) для избежания блокировок
+      // Это не блокирует выполнение и позволяет параллельным операциям продолжаться
+      this.dbClient`
+        UPDATE "Saga"
+        SET status = ${SagaStatusEnum.COMMITTED}, "updatedAt" = NOW()
+        WHERE id = ${sagaId}
+      `.catch((err: unknown) => {
+        // Логируем ошибку, но не блокируем выполнение
+        console.error(`Failed to update saga status to COMMITTED for ${sagaId}:`, err);
+      });
 
       return result;
     } catch (error) {
@@ -164,6 +171,9 @@ export class SagaManager {
       throw new Error("Saga not started. Call beginSaga() first.");
     }
 
+    // Сохраняем sagaId перед reset()
+    const sagaId = this.sagaId;
+
     let error: Error | undefined;
 
     try {
@@ -176,19 +186,8 @@ export class SagaManager {
           : new Error(String(compensationError));
     }
 
-    // Обновляем статус в БД
-    try {
-      await this.dbClient`
-        UPDATE "Saga"
-        SET status = ${SagaStatusEnum.ROLLED_BACK}, "updatedAt" = NOW()
-        WHERE id = ${this.sagaId}
-      `;
-    } catch (dbError) {
-      console.error("Failed to update saga status in database:", dbError);
-    }
-
     const result: SagaResult = {
-      sagaId: this.sagaId,
+      sagaId,
       status: SagaStatusEnum.ROLLED_BACK,
       operationsCount: this.operations.length,
       error,
@@ -196,6 +195,15 @@ export class SagaManager {
 
     // Очищаем состояние
     this.reset();
+
+    // Обновляем статус в БД асинхронно (fire-and-forget) для избежания блокировок
+    this.dbClient`
+      UPDATE "Saga"
+      SET status = ${SagaStatusEnum.ROLLED_BACK}, "updatedAt" = NOW()
+      WHERE id = ${sagaId}
+    `.catch((dbError: unknown) => {
+      console.error(`Failed to update saga status to ROLLED_BACK for ${sagaId}:`, dbError);
+    });
 
     return result;
   }

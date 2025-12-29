@@ -7,6 +7,7 @@ services:
       - nessie
       - trino
       - clickhouse
+      - rabbitmq
       - create-minio-bucket
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -17,6 +18,7 @@ services:
         echo "Waiting for Nessie..." && (until curl -fs http://nessie:19120/; do sleep 1; done)
         echo "Waiting for Trino..." && (until curl -fs http://trino:8080/v1/info; do sleep 1; done)
         echo "Waiting for ClickHouse..." && (until curl -fs http://clickhouse:8123/ping; do sleep 1; done)
+        echo "Waiting for RabbitMQ..." && (until curl -fs http://rabbitmq:15672/api/overview -u guest:guest; do sleep 1; done)
         echo "All services ready"
 
   postgres:
@@ -62,12 +64,15 @@ services:
       QUARKUS_HTTP_PORT: 19120
     ports:
       - "19120:19120"
+    volumes:
+      - E:/nessie:/var/lib/nessie
 
   trino:
     image: trinodb/trino:479
     depends_on:
       - nessie
       - create-minio-bucket
+      - create-nessie-ref
     ports:
       - "8080:8080"
     volumes:
@@ -84,6 +89,7 @@ services:
     depends_on:
       - nessie
       - create-minio-bucket
+      - create-nessie-ref
     ports:
       - "8080:8080"
     volumes:
@@ -114,6 +120,30 @@ services:
         mc anonymous set public local/warehouse || true
         echo "Bucket 'warehouse' ready"
 
+  create-nessie-ref:
+    image: curlimages/curl:8.17.0
+    depends_on:
+      - nessie
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "Waiting for Nessie..."
+        until curl -fs http://nessie:19120/api/v2/config 2>/dev/null; do
+          sleep 1
+        done
+        echo "Creating 'main' reference in Nessie..."
+        # Проверяем, существует ли ссылка 'main'
+        if curl -fs http://nessie:19120/api/v2/references/main 2>/dev/null; then
+          echo "Reference 'main' already exists"
+        else
+          # Создаем ссылку 'main' как BRANCH
+          curl -X POST http://nessie:19120/api/v2/references \
+            -H "Content-Type: application/json" \
+            -d '{"name":"main","type":"BRANCH"}' || echo "Failed to create 'main' reference (may already exist)"
+        fi
+        echo "Nessie reference 'main' ready"
+
   clickhouse:
     image: clickhouse/clickhouse-server:25.12
     environment:
@@ -134,6 +164,22 @@ services:
         soft: 262144
         hard: 262144
 
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"   # AMQP port
+      - "15672:15672" # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   pg_data:
   pg_primary_data:
@@ -142,3 +188,4 @@ volumes:
   # minio_data:
   clickhouse_data:
   trino_exchange:
+  rabbitmq_data:

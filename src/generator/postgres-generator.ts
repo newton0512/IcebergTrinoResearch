@@ -159,6 +159,56 @@ export class PostgresDataGenerator extends BaseDataGenerator {
     await sql`DROP TABLE IF EXISTS ${sql(tableName)}`;
   }
 
+  /**
+   * Execute raw SQL (for creating indexes, constraints, etc.)
+   */
+  async executeRaw(sql: string): Promise<void> {
+    const db = this.getSql();
+    await db.unsafe(sql);
+  }
+
+  /**
+   * Create a trigger function and trigger for balance check
+   */
+  async createBalanceTrigger(tableName: string, amountColumn: string = "amount"): Promise<void> {
+    const sql = this.getSql();
+    const escapedTableName = escapePostgresIdentifier(tableName);
+    const escapedAmountColumn = escapePostgresIdentifier(amountColumn);
+    const triggerName = `${tableName}_balance_trigger`;
+    const functionName = `check_balance_not_negative_${tableName.replace(/[^a-zA-Z0-9]/g, "_")}`;
+
+    // Create trigger function
+    await sql.unsafe(`
+      CREATE OR REPLACE FUNCTION ${escapePostgresIdentifier(functionName)}() 
+      RETURNS TRIGGER AS $$
+      BEGIN
+        -- Проверяем, что balance не отрицательный (если указан)
+        IF NEW.${escapedAmountColumn} IS NOT NULL AND NEW.${escapedAmountColumn} < 0 THEN
+          RAISE EXCEPTION 'Balance cannot be negative. Value: %', 
+            NEW.${escapedAmountColumn}
+            USING ERRCODE = '23514'; -- check_violation
+        END IF;
+        
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+    `);
+
+    // Drop existing trigger if exists
+    await sql.unsafe(`
+      DROP TRIGGER IF EXISTS ${escapePostgresIdentifier(triggerName)} ON ${escapedTableName};
+    `);
+
+    // Create trigger
+    await sql.unsafe(`
+      CREATE TRIGGER ${escapePostgresIdentifier(triggerName)}
+        BEFORE INSERT OR UPDATE ON ${escapedTableName}
+        FOR EACH ROW
+        WHEN (NEW.${escapedAmountColumn} IS NOT NULL)
+        EXECUTE FUNCTION ${escapePostgresIdentifier(functionName)}();
+    `);
+  }
+
   protected async generateNative(
     table: TableConfig,
     rowCount: number,

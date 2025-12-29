@@ -54,13 +54,19 @@
     "compose:clickhouse": "docker compose -f compose/docker-compose.yml up -d clickhouse",
     "compose:trino": "docker compose -f compose/docker-compose.yml up -d trino",
     "compose:trino-fte": "docker compose -f compose/docker-compose.yml up -d trino-fte",
+    "compose:rabbitmq": "docker compose -f compose/docker-compose.yml up -d rabbitmq",
     "compose:down": "docker compose -f compose/docker-compose.yml down",
     "compose:restart": "docker compose -f compose/docker-compose.yml restart",
-    "compose:reset": "docker compose -f compose/docker-compose.yml down --volumes --remove-orphans"
+    "compose:reset": "docker compose -f compose/docker-compose.yml down --volumes --remove-orphans",
+    "worker": "tsx src/hybrid-writer/worker.ts",
+    "worker:dev": "tsx watch src/hybrid-writer/worker.ts",
+    "test:hybrid-writer": "tsx test-hybrid-writer/index.ts"
   },
   "dependencies": {
     "@clickhouse/client": "^1.15.0",
     "@mkven/name-dictionaries": "^0.1.0",
+    "@types/amqplib": "^0.10.8",
+    "amqplib": "^0.10.9",
     "better-sqlite3": "^12.5.0",
     "pg-format": "^1.0.4",
     "postgres": "^3.4.7",
@@ -68,6 +74,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
+    "@faker-js/faker": "^10.1.0",
     "@release-it/conventional-changelog": "^10.0.4",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.0.3",

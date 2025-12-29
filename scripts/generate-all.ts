@@ -16,12 +16,14 @@ import {
   HybridDataGenerator,
   HybridDataGeneratorV2,
   HybridDataGeneratorV3,
+  HybridDataGeneratorV4,
   formatDuration,
   type DataGenerator,
   type Scenario,
   type HybridGeneratorConfig,
   type HybridGeneratorConfigV2,
   type HybridGeneratorConfigV3,
+  type HybridGeneratorConfigV4,
 } from "../src/generator/index.js";
 
 // Usage:
@@ -55,6 +57,7 @@ const SCENARIO_NAMES = [
   "russian-names",
   "lookup-demo",
   "bonus-registry",
+  "bonus-registry-checks",
 ] as const;
 type ScenarioName = (typeof SCENARIO_NAMES)[number];
 
@@ -70,6 +73,9 @@ const { values } = parseArgs({
     hybrid: { type: "boolean", default: false },
     hybridV2: { type: "boolean", default: false },
     hybridV3: { type: "boolean", default: false },
+    hybridV4: { type: "boolean", default: false },
+    drop: { type: "boolean", default: false }, // Флаг для удаления таблиц перед созданием
+    clean: { type: "boolean", default: false }, // Алиас для drop
     help: { type: "boolean", short: "h", default: false },
   },
 });
@@ -89,6 +95,8 @@ Options:
   --hybrid               Generate for Hybrid (PostgreSQL + Trino via external table)
   --hybridV2             Generate for Hybrid V2 (PostgreSQL + Trino, optimized with Saga batches)
   --hybridV3             Generate for Hybrid V3 (PostgreSQL lookup + Trino SQL generation with CROSS JOIN)
+  --hybridV4             Generate for Hybrid V4 (Temp table + check tables + Trino with validation)
+  --drop, --clean        Drop tables before creating (WARNING: will delete all data!)
   -h, --help             Show this help message
 
 Scenarios:
@@ -742,6 +750,433 @@ function getScenarioConfig(scenario: ScenarioName, rowCount: number): Scenario {
           },
         ],
       };
+
+    case "bonus-registry-checks":
+      return {
+        name: "Bonus Registry Checks (PostgreSQL + Trino)",
+        description:
+          "Bonus registry with unique check and balance check tables in PostgreSQL, full data in Trino/Iceberg",
+        steps: [
+          // Step 1: bonus_registry_unique_check (PostgreSQL)
+          {
+            table: {
+              name: "bonus_registry_unique_check",
+              description: "PostgreSQL table for unique check with registrar fields",
+              columns: [
+                {
+                  name: "id",
+                  type: "string",
+                  generator: { kind: "uuid" },
+                },
+                {
+                  name: "name_of_uniqueness",
+                  type: "string",
+                  generator: { kind: "constant", value: "registrar_unique" },
+                },
+                {
+                  name: "key_fields_hash",
+                  type: "string",
+                  generator: { kind: "constant", value: "" }, // Will be generated via transformation
+                },
+                {
+                  name: "createdAt",
+                  type: "datetime",
+                  generator: { kind: "datetime" },
+                },
+                {
+                  name: "sagaId",
+                  type: "string",
+                  generator: { kind: "uuid" },
+                },
+              ],
+            },
+            rowCount,
+          },
+          // Step 2: bonus_registry_balance_check (PostgreSQL)
+          {
+            table: {
+              name: "bonus_registry_balance_check",
+              description: "PostgreSQL table for balance check",
+              columns: [
+                {
+                  name: "id",
+                  type: "string",
+                  generator: { kind: "uuid" },
+                },
+                {
+                  name: "amount",
+                  type: "float",
+                  nullable: true,
+                  generator: {
+                    kind: "randomFloat",
+                    min: 0,
+                    max: 10000,
+                    precision: 2,
+                  },
+                },
+                {
+                  name: "sagaId",
+                  type: "string",
+                  generator: { kind: "uuid" },
+                },
+              ],
+            },
+            rowCount,
+          },
+          // Step 3: bonus_registry (Trino/Iceberg)
+          {
+            table: {
+              name: "bonus_registry",
+              description: "Trino/Iceberg table with full bonus registry data",
+              columns: [
+                {
+                  name: "id",
+                  type: "string",
+                  generator: { kind: "uuid" },
+                },
+                {
+                  name: "date",
+                  type: "datetime",
+                  nullable: true,
+                  generator: { kind: "datetime" },
+                },
+                {
+                  name: "registrar_type_id",
+                  type: "string",
+                  nullable: true,
+                  generator: {
+                    kind: "choice",
+                    values: [
+                      "bsBonusReceiveForTrip",
+                      "bsRecoveryRequestDoc",
+                      "bsTripForBonusDoc",
+                      "bsBonusDocument",
+                      "bsCustomTransaction",
+                      "bsCharityDocument",
+                      "bsExpirationDocument",
+                      "bsReturnDocument",
+                      "bsSurveyDoc",
+                      "bsCompensationDoc",
+                      "bsSouvenirRequest",
+                      "bsAdvanceDoc",
+                      "bsReturnAdvanceDoc",
+                    ],
+                  },
+                },
+                {
+                  name: "registrar_id",
+                  type: "string",
+                  nullable: true,
+                  generator: { kind: "uuid" },
+                },
+                {
+                  name: "row",
+                  type: "integer",
+                  nullable: true,
+                  generator: { kind: "randomInt", min: 1, max: 10 },
+                },
+                {
+                  name: "manager_id",
+                  type: "integer",
+                  nullable: true,
+                  generator: { kind: "randomInt", min: 1, max: 1000 },
+                },
+                {
+                  name: "bs_profile_id",
+                  type: "string",
+                  generator: { kind: "randomString", length: 10 },
+                },
+                {
+                  name: "accounted_for_bs_profile_id",
+                  type: "string",
+                  generator: { kind: "randomString", length: 10 },
+                },
+                {
+                  name: "first_name",
+                  type: "string",
+                  nullable: true,
+                  generator: {
+                    kind: "choiceByLookup",
+                    values: ENGLISH_FIRST_NAMES,
+                  },
+                },
+                {
+                  name: "first_name_latin",
+                  type: "string",
+                  nullable: true,
+                  generator: {
+                    kind: "choiceByLookup",
+                    values: ENGLISH_FIRST_NAMES,
+                  },
+                },
+                {
+                  name: "last_name",
+                  type: "string",
+                  nullable: true,
+                  generator: {
+                    kind: "choiceByLookup",
+                    values: ENGLISH_LAST_NAMES,
+                  },
+                },
+                {
+                  name: "last_name_latin",
+                  type: "string",
+                  nullable: true,
+                  generator: {
+                    kind: "choiceByLookup",
+                    values: ENGLISH_LAST_NAMES,
+                  },
+                },
+                {
+                  name: "departure_id",
+                  type: "integer",
+                  nullable: true,
+                  generator: { kind: "randomInt", min: 1, max: 100 },
+                },
+                {
+                  name: "arrival_id",
+                  type: "integer",
+                  nullable: true,
+                  generator: { kind: "randomInt", min: 1, max: 100 },
+                },
+                {
+                  name: "departure_date",
+                  type: "date",
+                  nullable: true,
+                  generator: { kind: "datetime" },
+                },
+                {
+                  name: "currency_entry_id",
+                  type: "integer",
+                  nullable: true,
+                  generator: { kind: "randomInt", min: 1, max: 10 },
+                },
+                {
+                  name: "bonus_type_id",
+                  type: "string",
+                  generator: { kind: "randomString", length: 8 },
+                },
+                {
+                  name: "action_source_id",
+                  type: "string",
+                  generator: { kind: "randomString", length: 8 },
+                },
+                {
+                  name: "bs_bonus_ticket_id",
+                  type: "string",
+                  nullable: true,
+                  generator: { kind: "randomString", length: 12 },
+                },
+                {
+                  name: "validity_time",
+                  type: "integer",
+                  nullable: true,
+                  generator: { kind: "randomInt", min: 30, max: 365 },
+                },
+                {
+                  name: "date_of_expire",
+                  type: "date",
+                  nullable: true,
+                  generator: { kind: "datetime" },
+                },
+                {
+                  name: "car_type_id",
+                  type: "string",
+                  nullable: true,
+                  generator: { kind: "randomString", length: 5 },
+                },
+                {
+                  name: "express_carrier_id",
+                  type: "integer",
+                  nullable: true,
+                  generator: { kind: "randomInt", min: 1, max: 50 },
+                },
+                {
+                  name: "carrier_id",
+                  type: "string",
+                  nullable: true,
+                  generator: { kind: "randomString", length: 8 },
+                },
+                {
+                  name: "bs_partner_id",
+                  type: "integer",
+                  nullable: true,
+                  generator: { kind: "randomInt", min: 1, max: 100 },
+                },
+                {
+                  name: "bs_train_number_id",
+                  type: "string",
+                  nullable: true,
+                  generator: { kind: "randomString", length: 10 },
+                },
+                {
+                  name: "bs_tourism_train_id",
+                  type: "string",
+                  nullable: true,
+                  generator: { kind: "randomString", length: 10 },
+                },
+                {
+                  name: "accounted_in_calculation",
+                  type: "boolean",
+                  nullable: true,
+                  generator: {
+                    kind: "choice",
+                    values: [true, false],
+                  },
+                },
+                {
+                  name: "cancelled",
+                  type: "boolean",
+                  nullable: true,
+                  generator: {
+                    kind: "choice",
+                    values: [true, false],
+                  },
+                },
+                {
+                  name: "bs_quota_id",
+                  type: "integer",
+                  nullable: true,
+                  generator: { kind: "randomInt", min: 1, max: 1000 },
+                },
+                {
+                  name: "doc_to_track_type_id",
+                  type: "string",
+                  generator: { kind: "randomString", length: 5 },
+                },
+                {
+                  name: "doc_to_track_id",
+                  type: "string",
+                  generator: { kind: "randomString", length: 10 },
+                },
+                {
+                  name: "doc_to_track_date",
+                  type: "date",
+                  nullable: true,
+                  generator: { kind: "datetime" },
+                },
+                {
+                  name: "active_date",
+                  type: "date",
+                  nullable: true,
+                  generator: { kind: "datetime" },
+                },
+                {
+                  name: "trip_for_another_person",
+                  type: "boolean",
+                  nullable: true,
+                  generator: {
+                    kind: "choice",
+                    values: [true, false],
+                  },
+                },
+                {
+                  name: "ticket_number",
+                  type: "string",
+                  nullable: true,
+                  generator: { kind: "randomString", length: 15 },
+                },
+                {
+                  name: "currency_amount",
+                  type: "integer",
+                  nullable: true,
+                  generator: { kind: "randomInt", min: 100, max: 10000 },
+                },
+                {
+                  name: "amount",
+                  type: "integer",
+                  generator: { kind: "randomInt", min: 0, max: 10000 },
+                },
+                {
+                  name: "bs_partner_bonus_type_id",
+                  type: "string",
+                  nullable: true,
+                  generator: { kind: "randomString", length: 8 },
+                },
+                {
+                  name: "express_service_class_id",
+                  type: "integer",
+                  nullable: true,
+                  generator: { kind: "randomInt", min: 1, max: 5 },
+                },
+                {
+                  name: "date_to_cancelled",
+                  type: "datetime",
+                  nullable: true,
+                  generator: { kind: "datetime" },
+                },
+                {
+                  name: "prolongable",
+                  type: "boolean",
+                  nullable: true,
+                  generator: {
+                    kind: "choice",
+                    values: [true, false],
+                  },
+                },
+                {
+                  name: "active_by_trips",
+                  type: "boolean",
+                  nullable: true,
+                  generator: {
+                    kind: "choice",
+                    values: [true, false],
+                  },
+                },
+                {
+                  name: "is_empty",
+                  type: "boolean",
+                  nullable: true,
+                  generator: {
+                    kind: "choice",
+                    values: [true, false],
+                  },
+                },
+                {
+                  name: "amount_calculation",
+                  type: "string",
+                  nullable: true,
+                  generator: { kind: "randomString", length: 20 },
+                },
+                {
+                  name: "distance",
+                  type: "integer",
+                  nullable: true,
+                  generator: { kind: "randomInt", min: 100, max: 5000 },
+                },
+                {
+                  name: "addition_amount",
+                  type: "integer",
+                  nullable: true,
+                  generator: { kind: "randomInt", min: 0, max: 1000 },
+                },
+                {
+                  name: "operation_doc_type_id",
+                  type: "string",
+                  nullable: true,
+                  generator: { kind: "randomString", length: 5 },
+                },
+                {
+                  name: "is_merged",
+                  type: "boolean",
+                  nullable: true,
+                  generator: {
+                    kind: "choice",
+                    values: [true, false],
+                  },
+                },
+                {
+                  name: "merged_date",
+                  type: "date",
+                  nullable: true,
+                  generator: { kind: "datetime" },
+                },
+              ],
+            },
+            rowCount,
+          },
+        ],
+      };
   }
 }
 
@@ -1001,6 +1436,44 @@ function createGenerators(): GeneratorEntry[] {
     generator: new HybridDataGeneratorV3(hybridConfigV3),
   });
 
+  // Гибридный генератор (вариант 4: временная таблица + check таблицы + Trino с валидацией)
+  // Используем bonus-registry-checks сценарий
+  // Для V4 не используем маппинг - генератор использует все колонки напрямую из table.columns
+  const hybridConfigV4: HybridGeneratorConfigV4 = {
+    postgresConfig: {
+      host: "localhost",
+      port: 5432,
+      database: "appdb",
+      username: "postgres",
+      password: "postgres",
+    },
+    trinoConfig: {
+      host: "localhost",
+      port: 8080,
+      catalog: "iceberg",
+      schema: "warehouse",
+      user: "trino",
+    },
+    postgresColumnMapping: [], // Пустой маппинг - не используется для V4
+    trinoColumnMapping: [], // Пустой маппинг - генератор использует все колонки из table.columns
+    postgresTableName: "bonus_registry_lookup", // Не используется для V4, но требуется в конфиге
+    trinoTableName: "bonus_registry",
+    tempTableColumns: ["registrar_type_id", "registrar_id", "row", "amount"],
+    uniqueCheckTableName: "bonus_registry_unique_check",
+    balanceCheckTableName: "bonus_registry_balance_check",
+    postgresCatalogName: "postgres",
+    // sagaBatchSize будет использоваться только если batchSize не указан в параметрах
+    // Если batchSize указан через -b, он будет использован вместо sagaBatchSize
+    sagaBatchSize: BATCH_SIZE ?? 100000, // Используем BATCH_SIZE из параметров, если указан
+  };
+
+  generators.push({
+    name: "Hybrid V4 (Temp table + check tables + Trino validation)",
+    flag: "hybridV4",
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
+    generator: new HybridDataGeneratorV4(hybridConfigV4),
+  });
+
   return generators;
 }
 
@@ -1012,17 +1485,20 @@ async function generateForDatabase(entry: GeneratorEntry): Promise<void> {
     await generator.connect();
     console.log(`Connected to ${name}`);
 
-    // Для гибридных генераторов используем bonus-registry сценарий
-    const scenarioToUse =
-      entry.flag === "hybrid" ||
-      entry.flag === "hybridV2" ||
-      entry.flag === "hybridV3"
+    // Для гибридных генераторов используем соответствующие сценарии
+    const scenarioToUse: Scenario =
+      entry.flag === "hybrid" || entry.flag === "hybridV2" || entry.flag === "hybridV3"
         ? getScenarioConfig("bonus-registry", ROW_COUNT)
-        : scenarioConfig;
+        : entry.flag === "hybridV4"
+          ? getScenarioConfig("bonus-registry-checks", ROW_COUNT)
+          : scenarioConfig;
 
+    // Используем dropFirst только если явно указан флаг --drop или --clean
+    const shouldDrop = values.drop || values.clean;
+    
     const result = await generator.runScenario({
       scenario: scenarioToUse,
-      dropFirst: true,
+      dropFirst: shouldDrop, // По умолчанию false - не удаляем таблицы
       batchSize: BATCH_SIZE,
     });
 
@@ -1044,6 +1520,49 @@ async function generateForDatabase(entry: GeneratorEntry): Promise<void> {
       `Total: ${result.totalRowsInserted.toLocaleString()} rows in ${formatDuration(result.durationMs)} (generation: ${formatDuration(result.generateMs)}, transformation: ${formatDuration(result.transformMs)}, optimize: ${formatDuration(result.optimizeMs)})`
     );
 
+    // Для сценария bonus-registry-checks создаем триггеры и индексы для PostgreSQL таблиц
+    if (SCENARIO === "bonus-registry-checks" && generator instanceof PostgresDataGenerator) {
+      const pgGenerator: PostgresDataGenerator = generator;
+      
+      // Создаем триггер для bonus_registry_balance_check
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+      await pgGenerator.createBalanceTrigger("bonus_registry_balance_check", "amount");
+      console.log("✓ Created balance trigger for bonus_registry_balance_check");
+      
+      // Создаем уникальный индекс для bonus_registry_unique_check
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+      await pgGenerator.executeRaw(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_bonus_registry_unique_check_key_hash_name
+        ON bonus_registry_unique_check (key_fields_hash, name_of_uniqueness)
+      `);
+      console.log("✓ Created unique index for bonus_registry_unique_check");
+      
+      // Создаем внешние ключи на sagaId (если таблица Saga существует)
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+        await pgGenerator.executeRaw(`
+          ALTER TABLE bonus_registry_unique_check
+          ADD CONSTRAINT IF NOT EXISTS fk_bonus_registry_unique_check_saga
+          FOREIGN KEY ("sagaId") REFERENCES "Saga"(id) ON DELETE CASCADE
+        `);
+        console.log("✓ Created foreign key for bonus_registry_unique_check.sagaId");
+      } catch {
+        console.log("⚠ Could not create foreign key for bonus_registry_unique_check.sagaId (Saga table may not exist)");
+      }
+      
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+        await pgGenerator.executeRaw(`
+          ALTER TABLE bonus_registry_balance_check
+          ADD CONSTRAINT IF NOT EXISTS fk_bonus_registry_balance_check_saga
+          FOREIGN KEY ("sagaId") REFERENCES "Saga"(id) ON DELETE CASCADE
+        `);
+        console.log("✓ Created foreign key for bonus_registry_balance_check.sagaId");
+      } catch {
+        console.log("⚠ Could not create foreign key for bonus_registry_balance_check.sagaId (Saga table may not exist)");
+      }
+    }
+
     // Verify row counts and show sample for each unique table
     const uniqueTables = [...new Set(result.steps.map((s) => s.tableName))];
     for (const tableName of uniqueTables) {
@@ -1061,7 +1580,14 @@ async function generateForDatabase(entry: GeneratorEntry): Promise<void> {
     console.log(`Disconnected from ${name}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
+    const stack = err instanceof Error ? err.stack : undefined;
     console.error(`Error with ${name}: ${message}`);
+    if (stack) {
+      console.error(`Stack trace:`, stack);
+    }
+    if (err && typeof err === "object" && "toString" in err) {
+      console.error(`Error details:`, err);
+    }
   } finally {
     await generator.disconnect();
   }
