@@ -816,3 +816,355 @@ export async function insertBonusRegistryIntoTrino(
 ): Promise<void> {
   return insertSingleRecordIntoTrino(trino, data, config);
 }
+
+// ============================================================================
+// Общие утилиты для подключения и проверки таблиц
+// ============================================================================
+
+import postgres, { type Sql } from "postgres";
+import { BasicAuth } from "trino-client";
+import type { HybridWriterConfig } from "./hybrid-writer.js";
+
+/**
+ * Конфигурация подключения к PostgreSQL
+ */
+export interface PostgresConfig {
+  host: string;
+  port: number;
+  database: string;
+  username: string;
+  password: string;
+}
+
+/**
+ * Конфигурация подключения к Trino
+ */
+export interface TrinoConfig {
+  host: string;
+  port: number;
+  catalog: string;
+  schema: string;
+  user: string;
+  table?: string;
+}
+
+/**
+ * Результат проверки таблиц
+ */
+export interface TablesCheckResult {
+  postgresUniqueCheck: boolean;
+  postgresBalanceCheck: boolean;
+  trinoTable: boolean;
+}
+
+/**
+ * Получение конфигурации PostgreSQL из переменных окружения
+ */
+export function getPostgresConfig(): PostgresConfig {
+  return {
+    host: process.env.POSTGRES_HOST || "localhost",
+    port: Number.parseInt(process.env.POSTGRES_PORT || "5432", 10),
+    database: process.env.POSTGRES_DB || "appdb",
+    username: process.env.POSTGRES_USER || "postgres",
+    password: process.env.POSTGRES_PASSWORD || "postgres",
+  };
+}
+
+/**
+ * Получение конфигурации Trino из переменных окружения
+ */
+export function getTrinoConfig(): TrinoConfig {
+  return {
+    host: process.env.TRINO_HOST || "localhost",
+    port: Number.parseInt(process.env.TRINO_PORT || "8080", 10),
+    catalog: process.env.TRINO_CATALOG || "iceberg",
+    schema: process.env.TRINO_SCHEMA || "warehouse",
+    user: process.env.TRINO_USER || "trino",
+    table: process.env.TRINO_TABLE || "bonus_registry",
+  };
+}
+
+/**
+ * Получение полной конфигурации HybridWriter из переменных окружения
+ */
+export function getHybridWriterConfig(): HybridWriterConfig {
+  const postgresConfig = getPostgresConfig();
+  const trinoConfig = getTrinoConfig();
+  
+  return {
+    postgres: postgresConfig,
+    trino: {
+      ...trinoConfig,
+      table: trinoConfig.table || "bonus_registry",
+    },
+    rabbitmq: {
+      host: process.env.RABBITMQ_HOST || "localhost",
+      port: Number.parseInt(process.env.RABBITMQ_PORT || "5672", 10),
+      username: process.env.RABBITMQ_USERNAME || "guest",
+      password: process.env.RABBITMQ_PASSWORD || "guest",
+      queue: process.env.RABBITMQ_QUEUE || "bonus_registry_queue",
+    },
+    tables: {
+      uniqueCheck: "bonus_registry_unique_check",
+      balanceCheck: "bonus_registry_balance_check",
+    },
+  };
+}
+
+/**
+ * Подключение к PostgreSQL
+ */
+export async function connectPostgres(config: PostgresConfig): Promise<Sql> {
+  return postgres({
+    host: config.host,
+    port: config.port,
+    database: config.database,
+    username: config.username,
+    password: config.password,
+  });
+}
+
+/**
+ * Подключение к Trino
+ */
+export function connectTrino(config: TrinoConfig): Trino {
+  return Trino.create({
+    server: `http://${config.host}:${config.port}`,
+    catalog: config.catalog,
+    schema: config.schema,
+    auth: new BasicAuth(config.user),
+  });
+}
+
+/**
+ * Проверка существования таблицы в PostgreSQL
+ */
+export async function checkPostgresTableExists(
+  sql: Sql,
+  tableName: string,
+  verbose = false
+): Promise<boolean> {
+  const startTime = Date.now();
+  const result = await sql.unsafe<Array<{ exists: boolean }>>(`
+    SELECT EXISTS (
+      SELECT FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      AND table_name = '${tableName}'
+    ) AS exists
+  `);
+  const duration = Date.now() - startTime;
+  const exists = result && result.length > 0 ? result[0]?.exists ?? false : false;
+  if (verbose) {
+    console.log(`  [${duration}ms] PostgreSQL table '${tableName}': ${exists ? "✓ exists" : "✗ not found"}`);
+  }
+  return exists;
+}
+
+/**
+ * Проверка существования таблицы в Trino/Iceberg
+ */
+export async function checkTrinoTableExists(
+  trino: Trino,
+  catalog: string,
+  schema: string,
+  tableName: string,
+  verbose = false
+): Promise<boolean> {
+  const startTime = Date.now();
+  const fullTableName = `${escapeTrinoIdentifier(catalog)}.${escapeTrinoIdentifier(schema)}.${escapeTrinoIdentifier(tableName)}`;
+  
+  // Альтернативный подход: пробуем выполнить простой SELECT из таблицы
+  // Если таблица существует, запрос не вызовет ошибку
+  try {
+    const testQuery = await trino.query(`
+      SELECT 1 FROM ${fullTableName} LIMIT 1
+    `);
+    
+    // Потребляем результат
+    for await (const _ of testQuery) {
+      // Просто потребляем, чтобы запрос выполнился
+    }
+    
+    const duration = Date.now() - startTime;
+    if (verbose) {
+      console.log(`  [${duration}ms] Trino table '${fullTableName}': ✓ exists (verified by SELECT)`);
+    }
+    return true;
+  } catch (selectError) {
+    // Если SELECT не сработал, пробуем через information_schema
+    try {
+      const sqlQuery = `
+        SELECT table_name 
+        FROM ${escapeTrinoIdentifier(catalog)}.information_schema.tables 
+        WHERE table_schema = ${escapeTrinoLiteral(schema)}
+        AND table_catalog = ${escapeTrinoLiteral(catalog)}
+        AND table_name = ${escapeTrinoLiteral(tableName)}
+      `;
+      
+      const query = await trino.query(sqlQuery);
+      
+      let found = false;
+      const allResults: unknown[] = [];
+      for await (const result of query) {
+        allResults.push(result);
+        // Trino может возвращать данные в разных форматах
+        // Проверяем несколько вариантов структуры ответа
+        if (result && typeof result === 'object') {
+          const data = result as Record<string, unknown>;
+          // Может быть table_name как ключ
+          if (data.table_name === tableName || data['table_name'] === tableName) {
+            found = true;
+            break;
+          }
+          // Может быть массив значений [table_name]
+          if (Array.isArray(data) && data.length > 0 && data[0] === tableName) {
+            found = true;
+            break;
+          }
+          // Может быть объект с данными в другом формате
+          const values = Object.values(data);
+          if (values.includes(tableName)) {
+            found = true;
+            break;
+          }
+        }
+        // Если результат - это строка
+        if (typeof result === 'string' && result === tableName) {
+          found = true;
+          break;
+        }
+      }
+      
+      const duration = Date.now() - startTime;
+      if (verbose) {
+        if (!found && allResults.length > 0) {
+          console.log(`  [${duration}ms] Trino table '${fullTableName}': ✗ not found (debug: received ${allResults.length} result(s), first result: ${JSON.stringify(allResults[0])})`);
+        } else {
+          console.log(`  [${duration}ms] Trino table '${fullTableName}': ${found ? "✓ exists" : "✗ not found"}`);
+        }
+      }
+      return found;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      if (verbose) {
+        console.log(`  [${duration}ms] Trino table '${fullTableName}': ✗ error - ${error instanceof Error ? error.message : String(error)}`);
+        if (error instanceof Error && error.stack) {
+          console.log(`    Stack: ${error.stack}`);
+        }
+      }
+      return false;
+    }
+  }
+}
+
+/**
+ * Проверка всех необходимых таблиц
+ */
+export async function checkTables(
+  sql: Sql,
+  trino: Trino,
+  config: {
+    postgresUniqueCheck: string;
+    postgresBalanceCheck: string;
+    trinoCatalog: string;
+    trinoSchema: string;
+    trinoTable: string;
+  },
+  verbose = false
+): Promise<TablesCheckResult> {
+  if (verbose) {
+    console.log("\n=== Checking tables ===");
+  }
+  
+  const checkStartTime = Date.now();
+  
+  const [postgresUniqueCheck, postgresBalanceCheck, trinoTable] = await Promise.all([
+    checkPostgresTableExists(sql, config.postgresUniqueCheck, verbose),
+    checkPostgresTableExists(sql, config.postgresBalanceCheck, verbose),
+    checkTrinoTableExists(trino, config.trinoCatalog, config.trinoSchema, config.trinoTable, verbose),
+  ]);
+  
+  const totalDuration = Date.now() - checkStartTime;
+  if (verbose) {
+    console.log(`\nTotal check time: ${totalDuration}ms`);
+  }
+  
+  return {
+    postgresUniqueCheck,
+    postgresBalanceCheck,
+    trinoTable,
+  };
+}
+
+/**
+ * Парсинг аргументов командной строки для тестовых скриптов
+ */
+export interface ParsedArgs {
+  count: number;
+  optimistic: boolean;
+  useBatching: boolean;
+  verbose: boolean;
+  concurrency: number;
+}
+
+/**
+ * Парсинг аргументов командной строки
+ */
+export function parseArgs(): ParsedArgs {
+  const args = process.argv.slice(2);
+  let count = 100; // По умолчанию 100 записей
+  let optimistic = false; // По умолчанию pessimistic режим
+  let useBatching = false; // По умолчанию без батчинга
+  let verbose = false; // По умолчанию без verbose
+  const concurrency = Number.parseInt(process.env.CONCURRENCY || "10", 10); // По умолчанию 10
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    
+    if (arg === "--count" || arg === "-c") {
+      const value = args[i + 1];
+      if (value) {
+        count = Number.parseInt(value, 10);
+        if (Number.isNaN(count) || count <= 0) {
+          console.error("Error: --count must be a positive number");
+          process.exit(1);
+        }
+        i++; // Пропускаем следующий аргумент
+      }
+    } else if (arg === "--optimistic" || arg === "-o") {
+      optimistic = true;
+    } else if (arg === "--batch" || arg === "-b") {
+      useBatching = true;
+    } else if (arg === "--verbose" || arg === "-v") {
+      verbose = true;
+    } else if (arg === "--help" || arg === "-h") {
+      console.log(`
+Usage: tsx script.ts [options]
+
+Options:
+  --count, -c <number>     Number of records to generate (default: 100)
+  --optimistic, -o         Use optimistic mode (send to RabbitMQ instead of direct Trino write)
+  --batch, -b              Use batching for Trino writes (only for pessimistic mode)
+  --verbose, -v            Enable verbose logging (shows details for each operation)
+  --help, -h               Show this help message
+
+Environment Variables:
+  CONCURRENCY              Number of parallel writes (default: 10)
+                           Higher values increase throughput but may overload the system
+  BATCH_SIZE               Batch size for Trino INSERT operations (default: 10)
+                           Only used when --batch flag is set
+
+Examples:
+  tsx script.ts --count 1000
+  tsx script.ts --count 500 --optimistic
+  tsx script.ts -c 100 -o
+  tsx script.ts --count 1000 --batch
+  CONCURRENCY=50 tsx script.ts --count 1000 --optimistic
+  tsx script.ts --count 100 --verbose
+      `);
+      process.exit(0);
+    }
+  }
+
+  return { count, optimistic, useBatching, verbose, concurrency };
+}

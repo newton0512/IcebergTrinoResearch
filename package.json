@@ -60,7 +60,11 @@
     "compose:reset": "docker compose -f compose/docker-compose.yml down --volumes --remove-orphans",
     "worker": "tsx src/hybrid-writer/worker.ts",
     "worker:dev": "tsx watch src/hybrid-writer/worker.ts",
-    "test:hybrid-writer": "tsx test-hybrid-writer/index.ts"
+    "test:hybrid-writer": "tsx test-hybrid-writer/index.ts",
+    "queue-worker": "tsx scripts/queue-worker.ts",
+    "queue-worker:dev": "tsx watch scripts/queue-worker.ts",
+    "write:queue": "tsx scripts/write-with-queue.ts",
+    "setup:tables": "tsx scripts/setup-tables.ts"
   },
   "dependencies": {
     "@clickhouse/client": "^1.15.0",
