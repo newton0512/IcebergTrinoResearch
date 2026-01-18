@@ -1,0 +1,35 @@
+# Пример конфигурации для terraform.tfvars
+# 
+# ВАЖНО: НЕ храните секреты в terraform.tfvars!
+# Используйте переменные окружения TF_VAR_*:
+#   export TF_VAR_selectel_domain="533343"
+#   export TF_VAR_selectel_username="Newton"
+#   export TF_VAR_selectel_password="***"
+#   export TF_VAR_selectel_openstack_password="***"
+
+environment_name  = "iceberg-test"
+region            = "ru-9"
+availability_zone = "ru-9a"
+disk_type         = "fast"
+
+# FLAVOR IDs (Selectel)
+# Найдите подходящие flavor IDs через панель Selectel или OpenStack CLI
+data_flavor_id = "1019" # 16 vCPU / 64GB (пример для Data Server)
+load_flavor_id = "2011" # 4 vCPU / 8GB (пример для Load Test Server)
+
+# Размеры дисков (GB)
+data_boot_disk_size_gb   = 50   # Загрузочный диск Data Server
+load_boot_disk_size_gb   = 50   # Загрузочный диск Load Test Server
+data_volume_size_gb      = 300  # Data-том для MinIO/Postgres/Nessie данных
+
+# SSH ключ на локальной машине
+ssh_public_key_path = "~/.ssh/id_rsa_terraform.pub"
+
+# Git-репозиторий для деплоя на ВМ
+repo_url    = "https://github.com/newton0512/IcebergTrinoResearch.git"
+repo_ref    = "terraform"  # branch/tag/commit
+repo_subdir = "samples-generation"
+
+# Настройка Trino под ресурсы Data Server
+trino_heap_gb              = 48  # JVM heap (GB)
+trino_max_direct_memory_gb = 8   # MaxDirectMemorySize (GB)

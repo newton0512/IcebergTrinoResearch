@@ -1,15 +1,30 @@
-domain_name = "533343"
-iam_username = "Newton"
-iam_password = "Wo;oG8V[vY(-DUR%aCY#"
-auth_region = "ru-9"
-region = "ru-9"
+# НЕ храните секреты в terraform.tfvars. Используйте переменные окружения TF_VAR_*.
+#
+# Пример:
+#   export TF_VAR_selectel_domain="533343"
+#   export TF_VAR_selectel_username="Newton"
+#   export TF_VAR_selectel_password="***"
+#   export TF_VAR_selectel_openstack_password="***"
 
-# FLAVOR ДЛЯ DATA SERVER (16 CPU / 64 GB)
-data_flavor_id = "1019"
+environment_name  = "iceberg-test"
+region            = "ru-9"
+availability_zone = "ru-9a"
+disk_type         = "fast"
 
-# FLAVOR ДЛЯ LOAD TEST SERVER (4 CPU / 8 GB)
-load_flavor_id = "2011"
+# FLAVOR IDs (Selectel)
+data_flavor_id = "1019" # 16 vCPU / 64GB
+load_flavor_id = "2011" # 4 vCPU / 8GB
 
-project_id = "007814094afb4946a6cae4831e15faa7"
+data_volume_size_gb = 300
 
-service_user_id = "763b325e73e948d8964edcd4e802dbb0"
+# SSH public key path (local machine)
+ssh_public_key_path = "~/.ssh/id_rsa_terraform.pub"
+
+# Repo to deploy on VMs
+repo_url    = "https://github.com/newton0512/IcebergTrinoResearch.git"
+repo_ref    = "terraform"
+repo_subdir = "samples-generation"
+
+# Trino tuning (Data Server)
+trino_heap_gb              = 48
+trino_max_direct_memory_gb = 8

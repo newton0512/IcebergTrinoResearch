@@ -1,4 +1,6 @@
 terraform {
+  required_version = ">= 1.0"
+
   required_providers {
     selectel = {
       source  = "selectel/selectel"
@@ -12,18 +14,20 @@ terraform {
 }
 
 provider "selectel" {
-  domain_name = var.domain_name
-  username    = var.iam_username
-  password    = var.iam_password
-  auth_region = var.auth_region
+  domain_name = var.selectel_domain
+  username    = var.selectel_username
+  password    = var.selectel_password
+  auth_region = var.region
   auth_url    = "https://cloud.api.selcloud.ru/identity/v3/"
 }
 
+# OpenStack provider (Selectel VPC / OpenStack API)
+# Авторизация будет идти через IAM service-user, который создаётся в projects.tf
 provider "openstack" {
-  auth_url    = "https://cloud.api.selcloud.ru/identity/v3/"
-  domain_name = var.domain_name
-  user_name   = var.iam_username
-  password    = var.iam_password
+  auth_url    = "https://cloud.api.selcloud.ru/identity/v3"
+  domain_name = var.selectel_domain
+  tenant_id   = selectel_vpc_project_v2.project.id
+  user_name   = selectel_iam_serviceuser_v1.openstack.name
+  password    = var.selectel_openstack_password
   region      = var.region
-  tenant_id   = var.project_id
 }
