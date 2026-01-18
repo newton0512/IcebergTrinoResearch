@@ -1,0 +1,60 @@
+#cloud-config
+# Benchmark VM - Selectel
+package_update: true
+package_upgrade: true
+
+packages:
+  - git
+  - curl
+  - fio
+  - build-essential
+  # memtier_benchmark build deps
+  - autoconf
+  - automake
+  - libpcre3-dev
+  - libevent-dev
+  - pkg-config
+  - zlib1g-dev
+  - libssl-dev
+  # PostgreSQL (includes pgbench)
+  - postgresql-18
+
+# Setup PGDG repo before apt runs
+bootcmd:
+  - 'test -f /etc/apt/sources.list.d/pgdg.sources || (curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/pgdg.gpg && printf "Types: deb\nURIs: http://apt.postgresql.org/pub/repos/apt\nSuites: noble-pgdg\nComponents: main\nSigned-By: /usr/share/keyrings/pgdg.gpg\n" > /etc/apt/sources.list.d/pgdg.sources && apt-get update)'
+
+runcmd:
+  # Docker
+  - curl -fsSL https://get.docker.com | sh
+
+  # Install warp (MinIO benchmark tool)
+  - curl -L https://github.com/minio/warp/releases/download/v1.0.8/warp_Linux_x86_64.tar.gz | tar xz -C /usr/local/bin/ warp
+  - chmod +x /usr/local/bin/warp
+
+  # Install memtier_benchmark (Redis benchmark tool)
+  - cd /tmp && git clone https://github.com/RedisLabs/memtier_benchmark.git
+  - cd /tmp/memtier_benchmark && autoreconf -ivf && ./configure && make -j$(nproc) && make install
+
+  # Node.js via NodeSource (more reliable than NVM in cloud-init)
+  - curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
+  - apt-get install -y nodejs
+
+  # PNPM via npm (more reliable than install script)
+  - npm install -g pnpm
+
+  # Install k6 (HTTP load testing tool)
+  - gpg -k
+  - gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+  - echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | tee /etc/apt/sources.list.d/k6.list
+  - apt-get update && apt-get install -y k6
+
+  # Clone and setup project
+  - cd /root
+  - git clone https://github.com/damir-manapov/indexless-query-benchmarks.git
+  - cd indexless-query-benchmarks
+  - pnpm install
+
+  # Create ready marker
+  - touch /root/cloud-init-ready
+
+final_message: "Benchmark VM ready after $UPTIME seconds"

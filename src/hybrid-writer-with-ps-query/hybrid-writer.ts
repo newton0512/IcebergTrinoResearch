@@ -16,7 +16,6 @@ import {
   generateRegistrarObject,
   bonus_registry_faker,
   hashObject,
-  type RegistrarObject,
   type BonusRegistryFakerObject,
 } from "../hybrid-writer/utils.js";
 import {
@@ -29,12 +28,12 @@ import {
 } from "../hybrid-writer/utils.js";
 import {
   createAllTables,
-  type CreateTablesConfig,
 } from "./create-tables.js";
 import {
   escapePostgresIdentifier,
   escapePostgresLiteral,
 } from "../generator/escape.js";
+import { SagaManager } from "../saga/index.js";
 
 export interface HybridWriterConfig {
   postgres: {
@@ -108,7 +107,6 @@ export class HybridWriterWithQueue {
     }
 
     const trinoConfig = getTrinoConfig();
-    const postgresConfig = getPostgresConfig();
 
     // Проверяем наличие таблиц в PostgreSQL
     const uniqueCheckExists = await checkPostgresTableExists(
@@ -159,10 +157,11 @@ export class HybridWriterWithQueue {
    * Запись одной записи
    * 
    * Процесс:
-   * 1. Генерация registrar данных → запись в bonus_registry_unique_check
-   * 2. Генерация баланса → запись в bonus_registry_balance_check
-   * 3. Генерация полного объекта через bonus_registry_faker()
-   * 4. Запись в trino_queue
+   * 1. Открываем сагу
+   * 2. Генерируем registrar_type_id, registrar_id, row с использованием generateRegistrarObject()
+   * 3. Записываем в bonus_registry_unique_check: при успехе продолжаем, при ошибке ролбэк саги
+   * 4. Генерируем баланс как случайное число от -1000 до +10000. Записываем в bonus_registry_balance_check. при успехе продолжаем, при ошибке ролбэк саги
+   * 5. Вызываем bonus_registry_faker(), дополняем полученный объект полями из сообщения и записываем все это в trino_queue
    */
   async write(options: { verbose?: boolean } = {}): Promise<WriteResult> {
     if (!this.sql) {
@@ -171,10 +170,21 @@ export class HybridWriterWithQueue {
 
     const verbose = options.verbose ?? false;
 
-    // Временная константа для sagaId (для тестирования без саги)
-    const TEMP_SAGA_ID = "temp-saga-id-for-testing";
+    // Создаем отдельный экземпляр SagaManager для каждого вызова write()
+    // Это необходимо для поддержки параллельных вызовов
+    const sagaManager = new SagaManager(this.sql);
 
-    // 1. Генерация registrar данных
+    // 1. Открываем сагу
+    const sagaBeginStart = Date.now();
+    const sagaId = await sagaManager.beginSaga({
+      description: "Write bonus registry entry to queue",
+    });
+    const sagaBeginDuration = Date.now() - sagaBeginStart;
+    if (verbose) {
+      console.log(`  ⏱ Saga opened: ${sagaId} (${sagaBeginDuration}ms)`);
+    }
+
+    // 2. Генерируем registrar_type_id, registrar_id, row
     const generateRegistrarStart = Date.now();
     const registrarData = generateRegistrarObject();
     const { registrar_type_id, registrar_id, row } = registrarData;
@@ -185,153 +195,244 @@ export class HybridWriterWithQueue {
       );
     }
 
-    // 2. Запись в bonus_registry_unique_check
-    const uniqueCheckStart = Date.now();
-    const keyFieldsHash = hashObject({
-      registrar_type_id,
-      registrar_id,
-      row,
-    });
+    try {
+      // 3. Записываем в bonus_registry_unique_check
+      sagaManager.addOperation({
+        id: "insert-unique-check",
+        execute: async () => {
+          const startTime = Date.now();
+          if (!this.sql) {
+            throw new Error("PostgreSQL connection not available");
+          }
 
-    const insertUniqueCheckSql = `
-      INSERT INTO ${escapePostgresIdentifier(this.config.tables.uniqueCheck)} (
-        id,
-        name_of_uniqueness,
-        key_fields_hash,
-        "createdAt",
-        "sagaId"
-      )
-      VALUES (
-        gen_random_uuid()::text,
-        ${escapePostgresLiteral("registrar_unique")},
-        ${escapePostgresLiteral(keyFieldsHash)},
-        NOW(),
-        ${escapePostgresLiteral(TEMP_SAGA_ID)}
-      )
-      RETURNING id
-    `;
+          // Вычисляем хэш на основе registrar_type_id, registrar_id и row
+          const keyFieldsHash = hashObject({
+            registrar_type_id,
+            registrar_id,
+            row,
+          });
 
-    const uniqueCheckResult = await this.sql.unsafe<Array<{ id: string }>>(
-      insertUniqueCheckSql
-    );
-    const uniqueCheckId =
-      uniqueCheckResult && uniqueCheckResult.length > 0
-        ? uniqueCheckResult[0]?.id
-        : null;
+          const insertSql = `
+            INSERT INTO ${escapePostgresIdentifier(this.config.tables.uniqueCheck)} (
+              id,
+              name_of_uniqueness,
+              key_fields_hash,
+              "createdAt",
+              "sagaId"
+            )
+            VALUES (
+              gen_random_uuid()::text,
+              ${escapePostgresLiteral("registrar_unique")},
+              ${escapePostgresLiteral(keyFieldsHash)},
+              NOW(),
+              ${escapePostgresLiteral(sagaId)}
+            )
+            RETURNING id
+          `;
 
-    if (!uniqueCheckId) {
-      throw new Error("Failed to insert into bonus_registry_unique_check");
-    }
+          const result = await this.sql.unsafe<{ id: string }[]>(insertSql);
+          const insertedId = result && result.length > 0 ? result[0]?.id : null;
 
-    const uniqueCheckDuration = Date.now() - uniqueCheckStart;
-    if (verbose) {
-      console.log(
-        `  ✓ Inserted into ${this.config.tables.uniqueCheck}: ${uniqueCheckId} (${uniqueCheckDuration}ms)`
-      );
-    }
+          if (!insertedId) {
+            throw new Error("Failed to insert into bonus_registry_unique_check");
+          }
 
-    // 3. Генерация баланса и запись в bonus_registry_balance_check
-    const balanceStart = Date.now();
-    const amount = Math.floor(Math.random() * 10001); // От 0 до 10000
+          const duration = Date.now() - startTime;
+          if (verbose) {
+            console.log(`  ✓ Inserted into ${this.config.tables.uniqueCheck}: ${insertedId} (${duration}ms)`);
+          }
+          return insertedId;
+        },
+        compensate: async (data) => {
+          if (!this.sql || !data) {
+            return;
+          }
+          const recordId = data as string;
+          await this.sql.unsafe(
+            `DELETE FROM ${escapePostgresIdentifier(this.config.tables.uniqueCheck)} WHERE id = ${escapePostgresLiteral(recordId)}`
+          );
+          if (verbose) {
+            console.log(`  ✓ Compensated ${this.config.tables.uniqueCheck}: ${recordId}`);
+          }
+        },
+      });
 
-    const insertBalanceCheckSql = `
-      INSERT INTO ${escapePostgresIdentifier(this.config.tables.balanceCheck)} (
-        id,
+      // 4. Генерируем баланс и записываем в bonus_registry_balance_check
+      const amount = Math.floor(Math.random() * 11001) - 1000; // От -1000 до +10000
+
+      sagaManager.addOperation({
+        id: "insert-balance-check",
+        execute: async () => {
+          const startTime = Date.now();
+          if (!this.sql) {
+            throw new Error("PostgreSQL connection not available");
+          }
+
+          const insertSql = `
+            INSERT INTO ${escapePostgresIdentifier(this.config.tables.balanceCheck)} (
+              id,
+              amount,
+              "sagaId"
+            )
+            VALUES (
+              gen_random_uuid()::text,
+              ${String(amount)}::DECIMAL(20, 2),
+              ${escapePostgresLiteral(sagaId)}
+            )
+            RETURNING id
+          `;
+
+          const result = await this.sql.unsafe<{ id: string }[]>(insertSql);
+          const insertedId = result && result.length > 0 ? result[0]?.id : null;
+
+          if (!insertedId) {
+            throw new Error("Failed to insert into bonus_registry_balance_check");
+          }
+
+          const duration = Date.now() - startTime;
+          if (verbose) {
+            console.log(`  ✓ Inserted into ${this.config.tables.balanceCheck}: ${insertedId} (amount: ${amount}, ${duration}ms)`);
+          }
+          return insertedId;
+        },
+        compensate: async (data) => {
+          if (!this.sql || !data) {
+            return;
+          }
+          const recordId = data as string;
+          await this.sql.unsafe(
+            `DELETE FROM ${escapePostgresIdentifier(this.config.tables.balanceCheck)} WHERE id = ${escapePostgresLiteral(recordId)}`
+          );
+          if (verbose) {
+            console.log(`  ✓ Compensated ${this.config.tables.balanceCheck}: ${recordId}`);
+          }
+        },
+      });
+
+      // 5. Вызываем bonus_registry_faker() и дополняем объект
+      const fakerStart = Date.now();
+      const fakerData = bonus_registry_faker();
+      const fakerDuration = Date.now() - fakerStart;
+      if (verbose) {
+        console.log(`  ⏱ Generated faker data (${fakerDuration}ms)`);
+      }
+
+      // Формирование финального объекта для записи в Trino
+      const finalData: BonusRegistryFakerObject & {
+        registrar_type_id: string;
+        registrar_id: string;
+        row: number;
+        amount: number;
+      } = {
+        ...fakerData,
+        registrar_type_id,
+        registrar_id,
+        row,
         amount,
-        "sagaId"
-      )
-      VALUES (
-        gen_random_uuid()::text,
-        ${String(amount)}::DECIMAL(20, 2),
-        ${escapePostgresLiteral(TEMP_SAGA_ID)}
-      )
-      RETURNING id
-    `;
+      };
 
-    const balanceCheckResult = await this.sql.unsafe<Array<{ id: string }>>(
-      insertBalanceCheckSql
-    );
-    const balanceCheckId =
-      balanceCheckResult && balanceCheckResult.length > 0
-        ? balanceCheckResult[0]?.id
-        : null;
+      // 6. Записываем в trino_queue в рамках саги
+      // Сохраняем queueId в переменной для доступа после выполнения саги
+      let queueId: number | null = null;
 
-    if (!balanceCheckId) {
-      throw new Error("Failed to insert into bonus_registry_balance_check");
+      sagaManager.addOperation({
+        id: "insert-into-trino-queue",
+        execute: async () => {
+          const startTime = Date.now();
+          if (!this.sql) {
+            throw new Error("PostgreSQL connection not available");
+          }
+
+          const queuePayload = {
+            table: this.config.trino.table,
+            values: finalData,
+          };
+
+          const insertSql = `
+            INSERT INTO ${escapePostgresIdentifier(this.config.tables.trinoQueue)} (
+              operation_type,
+              payload
+            )
+            VALUES (
+              ${escapePostgresLiteral("INSERT")},
+              ${escapePostgresLiteral(JSON.stringify(queuePayload))}::jsonb
+            )
+            RETURNING id
+          `;
+
+          const result = await this.sql.unsafe<{ id: number }[]>(insertSql);
+          const insertedId = result && result.length > 0 ? result[0]?.id : null;
+
+          if (!insertedId) {
+            throw new Error("Failed to insert into trino_queue");
+          }
+
+          // Сохраняем queueId для возврата из функции
+          queueId = insertedId;
+
+          const duration = Date.now() - startTime;
+          if (verbose) {
+            console.log(`  ✓ Inserted into ${this.config.tables.trinoQueue}: ${insertedId} (${duration}ms)`);
+          }
+          return insertedId;
+        },
+        compensate: async (data) => {
+          if (!this.sql || !data) {
+            return;
+          }
+          const queueIdToDelete = data;
+          await this.sql.unsafe(
+            `DELETE FROM ${escapePostgresIdentifier(this.config.tables.trinoQueue)} WHERE id = ${String(queueIdToDelete)}`
+          );
+          if (verbose) {
+            console.log(`  ✓ Compensated ${this.config.tables.trinoQueue}: ${queueIdToDelete}`);
+          }
+        },
+      });
+
+      // Коммитим сагу (выполняет все операции)
+      const commitStart = Date.now();
+      await sagaManager.commitSaga();
+      const commitDuration = Date.now() - commitStart;
+      if (verbose) {
+        console.log(`  ✓ Saga committed (${commitDuration}ms)`);
+      }
+
+      if (!queueId) {
+        throw new Error("Failed to get queueId from saga operation");
+      }
+
+      return {
+        registrar_type_id,
+        registrar_id,
+        row,
+        amount,
+        queueId,
+      };
+    } catch (error) {
+      // commitSaga() уже вызывает rollbackSaga() при ошибке, но для надежности
+      // проверяем и здесь, на случай если ошибка возникла до commitSaga()
+      try {
+        if (sagaManager) {
+          // Проверяем, что сага еще активна (не была откачена в commitSaga())
+          // rollbackSaga() безопасен для повторного вызова, но лучше проверить
+          await sagaManager.rollbackSaga();
+          if (verbose) {
+            console.log(`  ⏱ Saga rolled back due to error`);
+          }
+        }
+      } catch (rollbackError) {
+        // Если сага уже была откачена (например, в commitSaga()), это нормально
+        if (verbose) {
+          if (rollbackError instanceof Error && rollbackError.message.includes("already")) {
+            console.log(`  ⏱ Saga already rolled back (likely by commitSaga())`);
+          } else {
+            console.error(`  ✗ Error during saga rollback:`, rollbackError);
+          }
+        }
+      }
+      throw error;
     }
-
-    const balanceDuration = Date.now() - balanceStart;
-    if (verbose) {
-      console.log(
-        `  ✓ Inserted into ${this.config.tables.balanceCheck}: ${balanceCheckId} (amount: ${amount}, ${balanceDuration}ms)`
-      );
-    }
-
-    // 4. Генерация полного объекта через bonus_registry_faker()
-    const fakerStart = Date.now();
-    const fakerData = bonus_registry_faker();
-    const fakerDuration = Date.now() - fakerStart;
-    if (verbose) {
-      console.log(`  ⏱ Generated faker data (${fakerDuration}ms)`);
-    }
-
-    // 5. Формирование финального объекта для записи в Trino
-    const finalData: BonusRegistryFakerObject & {
-      registrar_type_id: string;
-      registrar_id: string;
-      row: number;
-      amount: number;
-    } = {
-      ...fakerData,
-      registrar_type_id,
-      registrar_id,
-      row,
-      amount,
-    };
-
-    // 6. Запись в trino_queue
-    const queueStart = Date.now();
-    const queuePayload = {
-      table: this.config.trino.table,
-      values: finalData,
-    };
-
-    const insertQueueSql = `
-      INSERT INTO ${escapePostgresIdentifier(this.config.tables.trinoQueue)} (
-        operation_type,
-        payload
-      )
-      VALUES (
-        ${escapePostgresLiteral("INSERT")},
-        ${escapePostgresLiteral(JSON.stringify(queuePayload))}::jsonb
-      )
-      RETURNING id
-    `;
-
-    const queueResult = await this.sql.unsafe<Array<{ id: number }>>(
-      insertQueueSql
-    );
-    const queueId =
-      queueResult && queueResult.length > 0 ? queueResult[0]?.id : null;
-
-    if (!queueId) {
-      throw new Error("Failed to insert into trino_queue");
-    }
-
-    const queueDuration = Date.now() - queueStart;
-    if (verbose) {
-      console.log(
-        `  ✓ Inserted into ${this.config.tables.trinoQueue}: ${queueId} (${queueDuration}ms)`
-      );
-    }
-
-    return {
-      registrar_type_id,
-      registrar_id,
-      row,
-      amount,
-      queueId,
-    };
   }
 
   /**

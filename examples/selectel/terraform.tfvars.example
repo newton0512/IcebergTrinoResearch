@@ -1,0 +1,34 @@
+# Selectel Account Credentials
+# Set via environment variables:
+#   export TF_VAR_selectel_domain="123456"
+#   export TF_VAR_selectel_username="your-username"
+#   export TF_VAR_selectel_password="your-password"
+#   export TF_VAR_selectel_openstack_password="your-openstack-password"
+# Get credentials from: https://my.selectel.ru/profile/apikeys
+
+# Environment name (used in resource naming)
+environment_name = "optuna"
+
+# Region and availability zone
+region            = "ru-7"
+availability_zone = "ru-7b"
+
+# SSH key path
+ssh_public_key_path = "~/.ssh/id_ed25519.pub"
+
+# VM Configuration
+cpu_count    = 16
+ram_gb       = 16
+disk_size_gb = 200
+disk_type    = "fast"  # Options: fast, universal, basic, basic_hdd
+
+# MinIO Cluster (Optional)
+# Uncomment to deploy a MinIO cluster with erasure coding
+# minio_enabled         = true
+# minio_root_password   = "minioadmin123"  # Must match warp benchmark credentials
+# minio_node_count      = 2    # Number of nodes (2, 3, 4, 6)
+# minio_node_cpu        = 4    # vCPU per node
+# minio_node_ram_gb     = 16   # RAM per node
+# minio_drives_per_node = 2    # Drives per node (2, 3, 4)
+# minio_drive_size_gb   = 100  # Size per drive
+# minio_drive_type      = "fast"  # fast or universal

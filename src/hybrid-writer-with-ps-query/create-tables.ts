@@ -193,7 +193,29 @@ export async function createBonusRegistryTableInTrino(
   const escapedCatalog = escapeTrinoIdentifier(catalog);
   const escapedSchema = escapeTrinoIdentifier(schema);
   const escapedTable = escapeTrinoIdentifier(tableName);
-  const fullTableName = `${escapedCatalog}.${escapedSchema}.${escapedTable}`;
+  const fullSchemaName = `${escapedCatalog}.${escapedSchema}`;
+  const fullTableName = `${fullSchemaName}.${escapedTable}`;
+
+  try {
+    // Сначала создаем схему (если её нет)
+    const createSchemaSql = `CREATE SCHEMA IF NOT EXISTS ${fullSchemaName}`;
+    console.log(`Creating schema: ${createSchemaSql}`);
+    const schemaQuery = await trino.query(createSchemaSql);
+    for await (const row of schemaQuery) {
+      // Проверяем на ошибки
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+      const rowAny = row as any;
+      if (rowAny && typeof rowAny === "object" && "error" in rowAny) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        const error = rowAny.error as { message?: string };
+        throw new Error(`Schema creation failed: ${error.message ?? "Unknown error"}`);
+      }
+    }
+    console.log(`✓ Schema ${fullSchemaName} created or already exists`);
+  } catch (error) {
+    console.error(`✗ Error creating schema ${fullSchemaName}:`, error instanceof Error ? error.message : String(error));
+    throw error;
+  }
 
   // Определение всех колонок таблицы bonus_registry
   const columns = [
@@ -249,17 +271,57 @@ export async function createBonusRegistryTableInTrino(
     "merged_date DATE",
   ].join(", ");
 
+  // Партиционирование по bs_profile_id и date
   const createTableSql = `
     CREATE TABLE IF NOT EXISTS ${fullTableName} (
       ${columns}
-    ) WITH (format = 'PARQUET')
+    ) WITH (
+      format = 'PARQUET',
+      format_version = 2,
+      partitioning = ARRAY[
+        'month(date)',
+        'truncate(bs_profile_id, 2)'
+      ]
+    )
   `;
 
-  const query = await trino.query(createTableSql);
-  
-  // Потребляем результаты запроса
-  for await (const _ of query) {
-    // Игнорируем результаты
+  try {
+    console.log(`Creating table: ${fullTableName}`);
+    console.log(`SQL: ${createTableSql}`);
+    const query = await trino.query(createTableSql);
+
+    // Потребляем результаты запроса и проверяем на ошибки
+    try {
+      for await (const row of query) {
+        // Проверяем на ошибки в объекте
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        const rowAny = row as any;
+        if (rowAny && typeof rowAny === "object" && "error" in rowAny) {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+          const error = rowAny.error as { message?: string; code?: number };
+          const errorMessage = `Table creation failed: ${error.message ?? "Unknown error"}`;
+          const errorCode = error.code !== undefined ? ` (code: ${String(error.code)})` : "";
+          console.error(`✗ ${errorMessage}${errorCode}`);
+          console.error(`✗ Failed SQL: ${createTableSql}`);
+          throw new Error(`${errorMessage}${errorCode}`);
+        }
+      }
+      console.log(`✓ Table ${fullTableName} created or already exists`);
+    } catch (queryError) {
+      // Если ошибка произошла при обработке результатов запроса
+      const errorMessage = queryError instanceof Error ? queryError.message : String(queryError);
+      console.error(`✗ Error processing query results: ${errorMessage}`);
+      console.error(`✗ Failed SQL: ${createTableSql}`);
+      throw queryError;
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`✗ Error creating table ${fullTableName}:`, errorMessage);
+    if (error instanceof Error && error.stack) {
+      console.error(`Stack trace:`, error.stack);
+    }
+    console.error(`✗ Failed SQL: ${createTableSql}`);
+    throw error;
   }
 }
 
@@ -358,9 +420,10 @@ export async function createAllTables(
     console.warn("⚠ Could not create foreign key for bonus_registry_balance_check.sagaId:", error instanceof Error ? error.message : String(error));
   }
 
-  console.log("\nCreating Trino/Iceberg tables...");
+  console.log("\nCreating Trino/Iceberg schema and tables...");
+  // Схема будет создана автоматически в createBonusRegistryTableInTrino
   await createBonusRegistryTableInTrino(trino.trino, trino.catalog, trino.schema);
-  console.log("✓ Created bonus_registry table in Trino/Iceberg");
+  console.log(`✓ Created schema ${trino.catalog}.${trino.schema} and bonus_registry table in Trino/Iceberg`);
 
   console.log("\n✓ All tables created successfully");
 }

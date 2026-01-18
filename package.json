@@ -64,7 +64,21 @@
     "queue-worker": "tsx scripts/queue-worker.ts",
     "queue-worker:dev": "tsx watch scripts/queue-worker.ts",
     "write:queue": "tsx scripts/write-with-queue.ts",
-    "setup:tables": "tsx scripts/setup-tables.ts"
+    "setup:tables": "tsx scripts/setup-tables.ts",
+    "write:trino-mass": "tsx scripts/write-trino-mass.ts",
+    "api:server": "tsx src/api/server.ts",
+    "api:dev": "tsx watch src/api/server.ts",
+    "k6:run": "bash k6-run-pipe.sh",
+    "k6:test": "bash k6-run-pipe.sh test-simple.js",
+    "k6:test-health": "bash k6-run-pipe.sh test-health.js",
+    "k6:postgres": "bash k6-run-pipe.sh k6-scripts/postgres-direct.js",
+    "k6:trino": "bash k6-run-pipe.sh k6-scripts/trino-direct.js",
+    "k6:write": "bash k6-run-pipe.sh k6-scripts/write-cycle.js",
+    "k6:consistency": "bash k6-run-pipe.sh k6-scripts/consistency-check.js",
+    "k6:analytics": "bash k6-run-pipe.sh k6-scripts/analytics-queries.js",
+    "k6:read-delay": "bash k6-run-pipe.sh k6-scripts/read-delay.js",
+    "k6:real-load": "bash k6-run-pipe.sh k6-scripts/real-load.js",
+    "k6:all": "bash k6-scripts/run-all.sh"
   },
   "dependencies": {
     "@clickhouse/client": "^1.15.0",
@@ -72,6 +86,7 @@
     "@types/amqplib": "^0.10.8",
     "amqplib": "^0.10.9",
     "better-sqlite3": "^12.5.0",
+    "express": "^4.18.2",
     "pg-format": "^1.0.4",
     "postgres": "^3.4.7",
     "trino-client": "^0.2.9"
@@ -81,6 +96,7 @@
     "@faker-js/faker": "^10.1.0",
     "@release-it/conventional-changelog": "^10.0.4",
     "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^4.17.21",
     "@types/node": "^25.0.3",
     "@types/pg-format": "^1.0.5",
     "eslint": "^9.39.2",

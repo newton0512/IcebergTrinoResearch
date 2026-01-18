@@ -1,0 +1,111 @@
+#cloud-config
+
+# Update system
+package_update: true
+package_upgrade: true
+
+# Install required packages
+packages:
+  - nodejs
+  - npm
+  - docker.io
+  - docker-compose
+  - wget
+  - curl
+
+# Install k6
+runcmd:
+  - |
+    # Install k6
+    sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D78C6C6极端的
+    echo "deb https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+    sudo apt-get update
+    sudo apt-get install k6
+
+  # Create test directory
+  - mkdir -p /opt/load-test
+
+  # Create package.json for Node.js project
+  - |
+    cat > /opt/load-test/package.json << 'EOF'
+{
+  "name": "trino-load-test",
+  "version": "1.0.0",
+  "description": "Load testing for Trino",
+  "main": "index.js",
+  "scripts": {
+    "test": "k6 run test.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0"
+  }
+}
+EOF
+
+  # Create sample test script
+  - |
+    cat > /opt/load-test/test.js << 'EOF'
+import http from 'k6/http';
+import { check, sleep } from 'k6';
+
+// Replace with actual Data Server IP
+export const options = {
+  stages: [
+    { duration: '30s', target: 10 },
+    { duration: '1m', target: 10 },
+    { duration: '30s', target: 0 },
+  ],
+};
+
+export default function () {
+  const trinoQuery = {
+    query: 'SELECT COUNT(*) FROM iceberg.default.test_table'
+  };
+
+  const res = http.post(
+    'http://DATA_SERVER_IP:8080/v1/statement',
+    JSON.stringify(trinoQuery),
+    { headers: { 'Content-Type': 'application/json' } }
+  );
+
+  check(res, {
+    'is status 200': (r) => r.status === 200,
+  });
+
+  sleep(1);
+}
+EOF
+
+  # Create setup script
+  - |
+    cat > /opt/load-test/setup.js << 'EOF'
+const axios = require('axios');
+
+// Function to test Trino connection
+async function testTrinoConnection(ip) {
+  try {
+    const response = await axios.get(`http://${ip}:8080/v1/info`);
+    console.log('Trino connection successful:', response.data);
+    return true;
+  } catch (error) {
+    console.error('Trino connection failed:', error.message);
+    return false;
+  }
+}
+
+// Function to replace IP in test file
+function updateTestFile(ip) {
+  const fs = require('fs');
+  let content = fs.readFileSync('./test.js', 'utf8');
+  content = content.replace(/DATA_SERVER_IP/g, ip);
+  fs.writeFileSync('./test.js', content);
+  console.log('Updated test file with IP:', ip);
+}
+
+module.exports = { testTrinoConnection, updateTestFile };
+EOF
+
+  # Install Node.js dependencies
+  - cd /opt/load-test && npm install
+
+final_message: "Load Test Server setup complete! Test directory: /opt/load-test"
