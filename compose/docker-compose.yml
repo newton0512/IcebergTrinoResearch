@@ -78,7 +78,7 @@ services:
     volumes:
       - nessie_data:/var/lib/nessie
 
-  trino-fte:
+  trino:
     image: trinodb/trino:479
     depends_on:
       - nessie
