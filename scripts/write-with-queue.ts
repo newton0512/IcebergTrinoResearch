@@ -126,21 +126,17 @@ async function main(): Promise<void> {
       const batchSize = randomInt(batchFrom, batchTo);
       const pauseMs = randomInt(pauseFrom, pauseTo);
 
-      console.log(`[round ${String(round)}] batch=${String(batchSize)} pause=${String(pauseMs)}ms — writing...`);
-
       const writeStart = Date.now();
-      const results = await writer.writeBatch(batchSize, { verbose: true }, 10);
+      const results = await writer.writeBatch(batchSize, {}, 10);
       const writeDuration = Date.now() - writeStart;
       const ok = results.length;
       const err = batchSize - ok;
       totalWritten += ok;
 
+      const errSuffix = err > 0 ? ` ${String(err)} err` : "";
       console.log(
-        `[round ${String(round)}] done: ${String(ok)} records in ${String(writeDuration)}ms` +
-          (err > 0 ? `, ${String(err)} errors` : "") +
-          ` | total written: ${String(totalWritten)}`
+        `[${String(round)}] pause=${String(pauseMs)}ms batch=${String(batchSize)} write=${String(writeDuration)}ms${errSuffix}`
       );
-      console.log(`[round ${String(round)}] waiting ${String(pauseMs)}ms...\n`);
 
       await sleep(pauseMs);
     }
