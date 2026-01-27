@@ -1,12 +1,17 @@
 ---
-# Load-test-server: проект, Docker, docker-compose — только для запуска K6 при тестировании.
-# API и queue-worker на data-server. K6_API_URL=http://{{ data_private_ip }}:3000
+# Load-test-server: проект, Docker, docker-compose, Node/pnpm.
+# K6, write-with-queue и др. команды запускаются здесь.
+# Postgres и Trino — на data-server. Подключение через POSTGRES_HOST/TRINO_HOST={{ data_private_ip }}.
+# Перед write-with-queue и т.п.: source /etc/samples-generation-load.env
 
 - name: Load test server
   hosts: load_test_server
   become: true
   vars:
     repo_dir: /opt/IcebergTrinoResearch
+    work_dir: "{{ repo_dir }}"
+    docker_compose_version: "v2.24.5"
+    compose_arch: "{{ 'aarch64' if ansible_architecture == 'aarch64' else 'x86_64' }}"
 
   tasks:
     - name: Install packages
@@ -34,11 +39,20 @@
         filename: docker
         state: present
 
-    - name: Install docker-compose-plugin
-      ansible.builtin.apt:
-        update_cache: true
-        name: docker-compose-plugin
-        state: present
+    - name: Install Docker Compose plugin (standalone binary)
+      block:
+        - name: Create Docker CLI plugins dir
+          ansible.builtin.file:
+            path: /usr/local/lib/docker/cli-plugins
+            state: directory
+            mode: "0755"
+
+        - name: Download Docker Compose binary
+          ansible.builtin.get_url:
+            url: "https://github.com/docker/compose/releases/download/{{ docker_compose_version }}/docker-compose-linux-{{ compose_arch }}"
+            dest: /usr/local/lib/docker/cli-plugins/docker-compose
+            mode: "0755"
+            force: true
 
     - name: Enable and start Docker
       ansible.builtin.systemd:
@@ -55,9 +69,55 @@
         force: true
         update: true
 
-    - name: Hint for running K6
+    - name: Install Node.js 20 (NodeSource)
+      ansible.builtin.shell: |
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+        apt-get install -y nodejs
+      args:
+        creates: /usr/bin/node
+
+    - name: Enable corepack and pnpm
+      ansible.builtin.shell: |
+        corepack enable
+        corepack prepare pnpm@latest --activate
+      args:
+        creates: /usr/bin/pnpm
+
+    - name: pnpm install
+      ansible.builtin.command:
+        cmd: pnpm install
+        chdir: "{{ work_dir }}"
+      environment:
+        POSTGRES_HOST: "{{ data_private_ip }}"
+        TRINO_HOST: "{{ data_private_ip }}"
+        POSTGRES_PORT: "5432"
+        TRINO_PORT: "8080"
+        POSTGRES_DB: appdb
+        TRINO_CATALOG: iceberg
+        TRINO_SCHEMA: warehouse
+        TRINO_USER: trino
+        TRINO_TABLE: bonus_registry
+
+    - name: Write /etc/samples-generation-load.env
+      ansible.builtin.template:
+        src: samples-generation-load.env.j2
+        dest: /etc/samples-generation-load.env
+        mode: "0644"
+
+    - name: Hint for K6, write-with-queue, etc.
       ansible.builtin.debug:
         msg: |
-          To run K6 load tests against API on data-server:
-            cd {{ repo_dir }}
+          Load-test server ready. Postgres and Trino are on data-server ({{ data_private_ip }}).
+
+          K6 (API on data-server):
+            cd {{ work_dir }}
             K6_API_URL={{ k6_api_url }} docker compose -f compose/docker-compose.yml --profile k6 run --rm k6 run /scripts/<script>.js
+
+          write-with-queue (source env first):
+            source /etc/samples-generation-load.env
+            cd {{ work_dir }}
+            pnpm run write:queue 10000
+            # options: pnpm run write:queue 10000 -v -d
+
+          Other commands (e.g. write:trino-mass) also need env:
+            source /etc/samples-generation-load.env && cd {{ work_dir }} && pnpm run <script>

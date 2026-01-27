@@ -1,32 +1,50 @@
 /**
- * Скрипт для записи данных через новый HybridWriter с очередью
- * 
- * Запуск: pnpm tsx scripts/write-with-queue.ts [count] [-v|--verbose] [-d|--delete]
- * 
+ * Скрипт для записи данных через HybridWriter с очередью.
+ * Работает непрерывно до прерывания (Ctrl+C).
+ *
+ * Параметры:
+ *   --pause-from, --pause-to    пауза между батчами, мс (default: 100..2000)
+ *   --batch-from, --batch-to    размер батча, кол-во записей (default: 100..2000)
+ *   -d, --delete                очистить таблицы перед стартом
+ *
+ * Запуск: pnpm tsx scripts/write-with-queue.ts [options]
+ *
  * Примеры:
- *   pnpm tsx scripts/write-with-queue.ts 100
- *   pnpm tsx scripts/write-with-queue.ts 1000 -v
- *   pnpm tsx scripts/write-with-queue.ts 1000 -d
+ *   pnpm tsx scripts/write-with-queue.ts
+ *   pnpm tsx scripts/write-with-queue.ts --pause-from 50 --pause-to 500 --batch-from 50 --batch-to 500
+ *   pnpm tsx scripts/write-with-queue.ts -d
  */
 
 import { HybridWriterWithQueue, getHybridWriterWithQueueConfig } from "../src/hybrid-writer-with-ps-query/hybrid-writer.js";
 import { connectPostgres, getPostgresConfig } from "../src/hybrid-writer/utils.js";
-import { escapePostgresIdentifier } from "../src/generator/escape.js";
 
-const args = process.argv.slice(2);
-const count = Number.parseInt(args.find((arg) => !arg.startsWith("-")) || "100", 10);
-const verbose = args.includes("-v") || args.includes("--verbose");
-const shouldDelete = args.includes("-d") || args.includes("--delete");
-
-const log = (...args: unknown[]): void => {
-  if (verbose) {
-    console.log(...args);
+function parseArg(name: string, defaultValue: number): number {
+  const re = new RegExp(`^--${name}=(\\d+)$`, "i");
+  for (const a of process.argv.slice(2)) {
+    const m = a.match(re);
+    const v = m?.[1];
+    if (v) return Number.parseInt(v, 10);
   }
-};
+  return defaultValue;
+}
+
+const pauseFrom = parseArg("pause-from", 100);
+const pauseTo = parseArg("pause-to", 2000);
+const batchFrom = parseArg("batch-from", 100);
+const batchTo = parseArg("batch-to", 2000);
+const shouldDelete = process.argv.includes("-d") || process.argv.includes("--delete");
 
 const logError = (...args: unknown[]): void => {
   console.error(...args);
 };
+
+function randomInt(from: number, to: number): number {
+  return Math.floor(Math.random() * (to - from + 1)) + from;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * Очистка таблиц перед записью
@@ -34,7 +52,7 @@ const logError = (...args: unknown[]): void => {
 async function cleanTablesBeforeWrite(): Promise<void> {
   const postgresConfig = getPostgresConfig();
   const sql = await connectPostgres(postgresConfig);
-  
+
   try {
     console.log("\n=== Cleaning tables ===");
     await sql.unsafe(`
@@ -58,70 +76,84 @@ async function cleanTablesBeforeWrite(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  log("============================================================");
-  log("HybridWriter with Queue - Write Test");
-  log("============================================================");
-  
-  const mainStartTime = Date.now();
-  
-  // Очистка таблиц перед записью (если указан флаг -d)
+  console.log("============================================================");
+  console.log("HybridWriter with Queue — continuous write (Ctrl+C to stop)");
+  console.log("============================================================");
+  console.log(`  pause: ${String(pauseFrom)}..${String(pauseTo)} ms`);
+  console.log(`  batch: ${String(batchFrom)}..${String(batchTo)} records`);
+  console.log("============================================================\n");
+
   if (shouldDelete) {
     await cleanTablesBeforeWrite();
   }
-  
+
   const config = getHybridWriterWithQueueConfig();
   const writer = new HybridWriterWithQueue(config);
-  
+
+  let stopped = false;
+
+  const onSignal = async (): Promise<void> => {
+    if (stopped) return;
+    stopped = true;
+    console.log("\n\nStopping... (Ctrl+C again to force)");
+    try {
+      await writer.disconnect();
+      console.log("Disconnected.");
+    } catch (e) {
+      logError("Disconnect error:", e);
+    }
+    process.exit(0);
+  };
+
+  process.on("SIGINT", () => {
+    void onSignal();
+  });
+  process.on("SIGTERM", () => {
+    void onSignal();
+  });
+
   try {
-    // Подключение (автоматически создаст таблицы если нужно)
-    log("\n=== Connecting ===");
     const connectStart = Date.now();
     await writer.connect();
-    const connectDuration = Date.now() - connectStart;
-    log(`  [${connectDuration}ms] Connected`);
-    
-    // Запись данных
-    log(`\n=== Writing ${count} records ===`);
-    const writeStart = Date.now();
-    
-    const results = await writer.writeBatch(count, { verbose }, 10);
-    
-    const writeDuration = Date.now() - writeStart;
-    const totalDuration = Date.now() - mainStartTime;
-    
-    // Статистика
-    console.log("\n============================================================");
-    console.log("✓ Write completed");
-    console.log("============================================================");
-    console.log(`  Records written: ${results.length}`);
-    console.log(`  Write duration: ${writeDuration}ms`);
-    console.log(`  Total duration: ${totalDuration}ms`);
-    console.log(`  Average per record: ${(writeDuration / results.length).toFixed(2)}ms`);
-    console.log(`  Rate: ${((results.length / writeDuration) * 1000).toFixed(2)} records/sec`);
-    console.log("============================================================");
-    console.log("\nNote: Records are queued in trino_queue.");
-    console.log("      Make sure queue-worker.ts is running to process them.");
-    console.log("");
-    
+    console.log(`[${String(Date.now() - connectStart)}ms] Connected\n`);
+
+    let round = 0;
+    let totalWritten = 0;
+
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- stopped is set by SIGINT/SIGTERM handler
+    while (!stopped) {
+      round += 1;
+      const batchSize = randomInt(batchFrom, batchTo);
+      const pauseMs = randomInt(pauseFrom, pauseTo);
+
+      console.log(`[round ${String(round)}] batch=${String(batchSize)} pause=${String(pauseMs)}ms — writing...`);
+
+      const writeStart = Date.now();
+      const results = await writer.writeBatch(batchSize, { verbose: true }, 10);
+      const writeDuration = Date.now() - writeStart;
+      const ok = results.length;
+      const err = batchSize - ok;
+      totalWritten += ok;
+
+      console.log(
+        `[round ${String(round)}] done: ${String(ok)} records in ${String(writeDuration)}ms` +
+          (err > 0 ? `, ${String(err)} errors` : "") +
+          ` | total written: ${String(totalWritten)}`
+      );
+      console.log(`[round ${String(round)}] waiting ${String(pauseMs)}ms...\n`);
+
+      await sleep(pauseMs);
+    }
   } catch (error) {
-    const totalDuration = Date.now() - mainStartTime;
     logError("\n============================================================");
     logError("✗ Write failed");
     logError("============================================================");
-    logError(`  Total duration: ${totalDuration}ms`);
     logError(`  Error: ${error instanceof Error ? error.message : String(error)}`);
-    if (error instanceof Error && error.stack && verbose) {
-      logError(`  Stack: ${error.stack}`);
-    }
+    logError(`  Stack: ${error instanceof Error ? (error.stack ?? "") : ""}`);
     logError("============================================================");
     throw error;
   } finally {
-    // Отключение
-    log("\n=== Disconnecting ===");
-    const disconnectStart = Date.now();
     await writer.disconnect();
-    const disconnectDuration = Date.now() - disconnectStart;
-    log(`  [${disconnectDuration}ms] Disconnected`);
   }
 }
 
