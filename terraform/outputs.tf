@@ -1,16 +1,11 @@
-output "data_server_public_ip" {
-  value       = openstack_networking_floatingip_v2.data.address
-  description = "Публичный IP Data Server"
-}
-
 output "load_test_public_ip" {
   value       = openstack_networking_floatingip_v2.load.address
-  description = "Публичный IP Load Test Server"
+  description = "Публичный IP Load Test Server (единственный внешний IP)"
 }
 
 output "data_server_private_ip" {
   value       = openstack_compute_instance_v2.data.access_ip_v4
-  description = "Приватный IP Data Server"
+  description = "Приватный IP Data Server (доступен только из внутренней сети)"
 }
 
 output "load_test_private_ip" {
@@ -18,24 +13,14 @@ output "load_test_private_ip" {
   description = "Приватный IP Load Test Server"
 }
 
-output "ssh_data_server" {
-  value       = "ssh ubuntu@${openstack_networking_floatingip_v2.data.address}"
-  description = "Команда SSH для подключения к Data Server"
+output "ansible_load_public_ip" {
+  value       = openstack_networking_floatingip_v2.load.address
+  description = "Ansible: ansible_host для load_test_server (публичный IP)"
 }
 
-output "ssh_load_test_server" {
-  value       = "ssh ubuntu@${openstack_networking_floatingip_v2.load.address}"
-  description = "Команда SSH для подключения к Load Test Server"
-}
-
-output "wait_for_data_server" {
-  value       = "ssh ubuntu@${openstack_networking_floatingip_v2.data.address} 'while [ ! -f /root/cloud-init-ready-data ]; do echo \"Waiting for Data Server setup...\"; sleep 10; done; echo \"Data Server ready!\"'"
-  description = "Команда для ожидания завершения cloud-init на Data Server"
-}
-
-output "wait_for_load_test_server" {
-  value       = "ssh ubuntu@${openstack_networking_floatingip_v2.load.address} 'while [ ! -f /root/cloud-init-ready-load ]; do echo \"Waiting for Load Test Server setup...\"; sleep 10; done; echo \"Load Test Server ready!\"'"
-  description = "Команда для ожидания завершения cloud-init на Load Test Server"
+output "ansible_data_private_ip" {
+  value       = openstack_compute_instance_v2.data.access_ip_v4
+  description = "Ansible: ansible_host для data_server (приватный IP, доступ через ProxyJump)"
 }
 
 output "project_id" {

@@ -11,12 +11,15 @@ Terraform конфигурация для автоматического раз�
    - MinIO - S3-совместимое хранилище для Iceberg/Parquet данных
    - Nessie - catalog-сервис для управления метаданными Iceberg
    - Trino - SQL-движок для запросов к Iceberg данным
+   - **Доступен только из внутренней сети** (без внешнего IP для безопасности)
+   - Доступ извне через SSH портфорвардинг через Load Test Server
 
 2. **Load Test Server** (4 vCPU / 8GB RAM / 50GB диск):
    - Node.js + pnpm - для запуска проекта samples-generation
    - API сервер - REST API для нагрузочного тестирования
    - Queue Worker - обработка очереди trino_queue
    - K6 - инструмент для нагрузочного тестирования (через Docker)
+   - **Имеет внешний IP** для доступа и тестирования
 
 ## Prerequisites
 
@@ -80,7 +83,7 @@ terraform plan
 - SSH keypair
 - Приватная сеть и роутер
 - 2 сервера (Data + Load Test)
-- 2 Floating IP (публичные адреса)
+- 1 Floating IP (только для Load Test Server, Data Server без внешнего IP)
 - Security groups с правилами для портов
 
 ### 2. Применение изменений
@@ -96,8 +99,7 @@ terraform apply
 ### 3. Получение информации о развернутой инфраструктуре
 
 ```bash
-# Публичные IP адреса
-terraform output data_server_public_ip
+# Публичный IP Load Test Server (единственный внешний IP)
 terraform output load_test_public_ip
 
 # Приватные IP адреса
@@ -105,8 +107,9 @@ terraform output data_server_private_ip
 terraform output load_test_private_ip
 
 # Команды SSH
-terraform output ssh_data_server
-terraform output ssh_load_test_server
+terraform output ssh_load_test_server              # Прямое подключение к Load Test Server
+terraform output ssh_data_server_direct            # Прямое подключение к Data Server через jump host
+terraform output ssh_data_server_via_tunnel        # SSH портфорвардинг для доступа к сервисам Data Server
 
 # Команды для ожидания готовности (cloud-init завершен)
 terraform output wait_for_data_server
@@ -125,21 +128,95 @@ Cloud-init автоматически:
 Дождитесь завершения cloud-init на обоих серверах:
 
 ```bash
-# Ожидание готовности Data Server
-eval $(terraform output -raw wait_for_data_server)
-
 # Ожидание готовности Load Test Server
 eval $(terraform output -raw wait_for_load_test_server)
+
+# Ожидание готовности Data Server (через jump host)
+eval $(terraform output -raw wait_for_data_server)
 ```
 
 Или вручную:
 
 ```bash
-DATA_IP=$(terraform output -raw data_server_public_ip)
 LOAD_IP=$(terraform output -raw load_test_public_ip)
+DATA_PRIVATE=$(terraform output -raw data_server_private_ip)
 
-ssh ubuntu@$DATA_IP 'while [ ! -f /root/cloud-init-ready-data ]; do echo "Waiting..."; sleep 10; done; echo "Ready!"'
-ssh ubuntu@$LOAD_IP 'while [ ! -f /root/cloud-init-ready-load ]; do echo "Waiting..."; sleep 10; done; echo "Ready!"'
+# Load Test Server
+ssh root@$LOAD_IP 'while [ ! -f /root/cloud-init-ready-load ]; do echo "Waiting..."; sleep 10; done; echo "Ready!"'
+
+# Data Server (через jump host)
+ssh root@$LOAD_IP "ssh root@$DATA_PRIVATE 'while [ ! -f /root/cloud-init-ready-data ]; do echo \"Waiting...\"; sleep 10; done; echo \"Ready!\"'"
+```
+
+## Доступ к Data Server
+
+Data Server находится во внутренней сети и не имеет внешнего IP. Доступ возможен двумя способами:
+
+### Вариант 1: SSH портфорвардинг (рекомендуется для веб-интерфейсов)
+
+Пробрасывает порты Data Server на ваш локальный компьютер:
+
+```bash
+LOAD_IP=$(terraform output -raw load_test_public_ip)
+DATA_PRIVATE=$(terraform output -raw data_server_private_ip)
+
+# Пробросить все нужные порты (Trino:8080, MinIO API:9000, MinIO Console:9001)
+ssh -L 8080:$DATA_PRIVATE:8080 \
+    -L 9000:$DATA_PRIVATE:9000 \
+    -L 9001:$DATA_PRIVATE:9001 \
+    root@$LOAD_IP -N
+
+# Теперь на локальном компьютере доступны:
+# - Trino: http://localhost:8080
+# - MinIO API: http://localhost:9000
+# - MinIO Console: http://localhost:9001
+```
+
+Или используйте готовую команду из outputs:
+
+```bash
+# Команда уже содержит -N флаг (без открытия интерактивной сессии)
+eval $(terraform output -raw ssh_data_server_via_tunnel)
+
+# Для фонового режима добавьте -f
+eval $(terraform output -raw ssh_data_server_via_tunnel) -f
+```
+
+### Вариант 2: Прямой SSH через jump host
+
+```bash
+LOAD_IP=$(terraform output -raw load_test_public_ip)
+DATA_PRIVATE=$(terraform output -raw data_server_private_ip)
+
+# Подключение к Data Server через Load Test Server как jump host
+ssh -J root@$LOAD_IP root@$DATA_PRIVATE
+
+# Или используйте готовую команду:
+eval $(terraform output -raw ssh_data_server_direct)
+```
+
+Настройте SSH config для удобства (опционально):
+
+```bash
+# Сначала получите значения
+LOAD_IP=$(terraform output -raw load_test_public_ip)
+DATA_PRIVATE=$(terraform output -raw data_server_private_ip)
+
+# Добавьте в ~/.ssh/config
+cat >> ~/.ssh/config <<EOF
+Host load-test-jump
+    HostName $LOAD_IP
+    User root
+    IdentityFile ~/.ssh/id_rsa_terraform
+
+Host data-server
+    HostName $DATA_PRIVATE
+    User root
+    ProxyJump load-test-jump
+    IdentityFile ~/.ssh/id_rsa_terraform
+EOF
+
+# Теперь просто: ssh data-server
 ```
 
 ## Проверка работы сервисов
@@ -147,20 +224,25 @@ ssh ubuntu@$LOAD_IP 'while [ ! -f /root/cloud-init-ready-load ]; do echo "Waitin
 ### Data Server
 
 ```bash
-DATA_IP=$(terraform output -raw data_server_public_ip)
+LOAD_IP=$(terraform output -raw load_test_public_ip)
+DATA_PRIVATE=$(terraform output -raw data_server_private_ip)
 
-# Проверка Trino
-curl http://$DATA_IP:8080/v1/info
+# Через SSH портфорвардинг (после запуска туннеля)
+# На локальном компьютере:
+curl http://localhost:8080/v1/info  # Trino
+curl http://localhost:9000/minio/health/live  # MinIO API
+curl http://localhost:19120/api/v2/config  # Nessie (если пробросили порт)
 
-# Проверка MinIO Console (откройте в браузере)
-echo "MinIO Console: http://$DATA_IP:9001"
+# Через Load Test Server (из внутренней сети)
+ssh root@$LOAD_IP "curl http://$DATA_PRIVATE:8080/v1/info"  # Trino
+ssh root@$LOAD_IP "curl http://$DATA_PRIVATE:19120/api/v2/config"  # Nessie
+
+# MinIO Console (откройте в браузере после запуска портфорвардинга)
+echo "MinIO Console: http://localhost:9001 (после запуска SSH туннеля)"
 echo "Credentials: minioadmin / minioadmin"
 
-# Проверка Nessie
-curl http://$DATA_IP:19120/api/v2/config
-
 # Проверка PostgreSQL (из Load Test Server)
-# (PostgreSQL доступен только из приватной сети)
+ssh root@$LOAD_IP "nc -zv $DATA_PRIVATE 5432"
 ```
 
 ### Load Test Server
@@ -172,7 +254,7 @@ LOAD_IP=$(terraform output -raw load_test_public_ip)
 curl http://$LOAD_IP:3000/api/health
 
 # Проверка статуса сервисов
-ssh ubuntu@$LOAD_IP 'systemctl status samples-api samples-queue-worker'
+ssh root@$LOAD_IP 'systemctl status samples-api samples-queue-worker'
 ```
 
 ## Работа с проектом
@@ -184,7 +266,7 @@ ssh ubuntu@$LOAD_IP 'systemctl status samples-api samples-queue-worker'
 ```bash
 LOAD_IP=$(terraform output -raw load_test_public_ip)
 
-ssh ubuntu@$LOAD_IP
+ssh root@$LOAD_IP
 cd /opt/IcebergTrinoResearch/samples-generation
 pnpm run setup:tables
 ```
@@ -200,7 +282,7 @@ pnpm run setup:tables
 ```bash
 LOAD_IP=$(terraform output -raw load_test_public_ip)
 
-ssh ubuntu@$LOAD_IP
+ssh root@$LOAD_IP
 cd /opt/IcebergTrinoResearch/samples-generation
 
 # 500 миллионов строк (по умолчанию)
@@ -247,7 +329,7 @@ curl http://$LOAD_IP:3000/api/health
 ```bash
 LOAD_IP=$(terraform output -raw load_test_public_ip)
 
-ssh ubuntu@$LOAD_IP
+ssh root@$LOAD_IP
 cd /opt/IcebergTrinoResearch/samples-generation
 
 # Простой тест подключения
@@ -308,6 +390,21 @@ curl http://$LOAD_IP:3000/api/queue/status
 curl http://$LOAD_IP:3000/api/analytics/count
 ```
 
+### 5. Доступ к Trino через SSH портфорвардинг
+
+Для удобной работы с Trino через CLI или веб-интерфейс используйте портфорвардинг:
+
+```bash
+LOAD_IP=$(terraform output -raw load_test_public_ip)
+DATA_PRIVATE=$(terraform output -raw data_server_private_ip)
+
+# Запустите SSH туннель в отдельном терминале
+ssh -L 8080:$DATA_PRIVATE:8080 root@$LOAD_IP -N
+
+# Теперь на локальном компьютере доступен Trino через http://localhost:8080
+# Можно использовать Trino CLI или открыть веб-интерфейс в браузере
+```
+
 ## Настройка Trino
 
 Trino автоматически настроен под ресурсы Data Server:
@@ -357,7 +454,7 @@ terraform destroy
    terraform apply
    ```
 
-### Floating IP не привязывается
+### Floating IP не привязывается (или квота исчерпана)
 
 Если видите ошибку `ExternalGatewayForFloatingIPNotFound`:
 - Убедитесь что роутер создан и подключен к внешней сети
@@ -368,44 +465,54 @@ terraform destroy
   terraform apply
   ```
 
+Если видите ошибку `OverQuota` для Floating IP:
+- Конфигурация использует только один внешний IP для Load Test Server
+- Data Server остается во внутренней сети (более безопасно)
+- Если все еще не хватает квоты, удалите неиспользуемые Floating IP в панели Selectel или запросите увеличение квоты
+
 ### Сервисы не запускаются
 
-1. Проверьте логи cloud-init:
+1. Проверьте логи cloud-init на Data Server:
    ```bash
-   ssh ubuntu@$DATA_IP 'sudo journalctl -u cloud-init -f'
+   LOAD_IP=$(terraform output -raw load_test_public_ip)
+   DATA_PRIVATE=$(terraform output -raw data_server_private_ip)
+   
+   ssh root@$LOAD_IP "ssh root@$DATA_PRIVATE 'journalctl -u cloud-init -f'"
    ```
 
-2. Проверьте Docker Compose:
+2. Проверьте Docker Compose на Data Server:
    ```bash
-   ssh ubuntu@$DATA_IP 'cd /opt/IcebergTrinoResearch/samples-generation && docker compose -f compose/docker-compose.yml ps'
-   ssh ubuntu@$DATA_IP 'cd /opt/IcebergTrinoResearch/samples-generation && docker compose -f compose/docker-compose.yml logs'
+   ssh root@$LOAD_IP "ssh root@$DATA_PRIVATE 'cd /opt/IcebergTrinoResearch/samples-generation && docker compose -f compose/docker-compose.yml ps'"
+   ssh root@$LOAD_IP "ssh root@$DATA_PRIVATE 'cd /opt/IcebergTrinoResearch/samples-generation && docker compose -f compose/docker-compose.yml logs'"
    ```
 
 3. Проверьте systemd сервисы на Load Server:
    ```bash
-   ssh ubuntu@$LOAD_IP 'systemctl status samples-api samples-queue-worker samples-setup'
-   ssh ubuntu@$LOAD_IP 'journalctl -u samples-api -f'
+   ssh root@$LOAD_IP 'systemctl status samples-api samples-queue-worker samples-setup'
+   ssh root@$LOAD_IP 'journalctl -u samples-api -f'
    ```
 
 ### API не отвечает
 
 1. Проверьте что API сервер запущен:
    ```bash
-   ssh ubuntu@$LOAD_IP 'systemctl status samples-api'
+   ssh root@$LOAD_IP 'systemctl status samples-api'
    ```
 
 2. Проверьте что порт 3000 открыт в security group (уже настроено автоматически)
 
 3. Проверьте переменные окружения:
    ```bash
-   ssh ubuntu@$LOAD_IP 'cat /etc/samples-generation.env'
+   ssh root@$LOAD_IP 'cat /etc/samples-generation.env'
    ```
 
 4. Проверьте доступность Data Server из Load Test Server:
    ```bash
+   LOAD_IP=$(terraform output -raw load_test_public_ip)
    DATA_PRIVATE=$(terraform output -raw data_server_private_ip)
-   ssh ubuntu@$LOAD_IP "nc -zv $DATA_PRIVATE 5432"  # PostgreSQL
-   ssh ubuntu@$LOAD_IP "curl -v http://$DATA_PRIVATE:8080/v1/info"  # Trino
+   ssh root@$LOAD_IP "nc -zv $DATA_PRIVATE 5432"  # PostgreSQL
+   ssh root@$LOAD_IP "curl -v http://$DATA_PRIVATE:8080/v1/info"  # Trino
+   ssh root@$LOAD_IP "curl -v http://$DATA_PRIVATE:19120/api/v2/config"  # Nessie
    ```
 
 ## Переменные конфигурации
@@ -441,51 +548,70 @@ terraform destroy
 
 ## Firewall Rules
 
-### Data Server
+### Data Server (только внутренняя сеть, без внешнего IP)
 
-- **22** (SSH) - извне (0.0.0.0/0)
-- **8080** (Trino) - извне (0.0.0.0/0)
-- **9000** (MinIO API) - извне (0.0.0.0/0)
-- **9001** (MinIO Console) - извне (0.0.0.0/0)
+- **22** (SSH) - только из приватной сети (доступ через Load Test Server)
+- **8080** (Trino) - только из приватной сети (доступ извне через SSH портфорвардинг)
+- **9000** (MinIO API) - только из приватной сети (доступ извне через SSH портфорвардинг)
+- **9001** (MinIO Console) - только из приватной сети (доступ извне через SSH портфорвардинг)
 - **19120** (Nessie) - только из приватной сети
 - **5432** (PostgreSQL) - только из приватной сети
 
-### Load Test Server
+### Load Test Server (с внешним IP)
 
 - **22** (SSH) - извне (0.0.0.0/0)
 - **3000** (API) - извне (0.0.0.0/0)
 
 Все сервисы также доступны из приватной сети между серверами.
 
+**Безопасность:** Data Server находится во внутренней сети для защиты от внешних атак. Доступ извне осуществляется только через SSH портфорвардинг через Load Test Server.
+
 ## Дополнительные команды
 
 ### Подключение к Trino
 
-```bash
-DATA_IP=$(terraform output -raw data_server_public_ip)
+Через SSH портфорвардинг (рекомендуется):
 
-# Через curl
-curl -X POST http://$DATA_IP:8080/v1/statement \
+```bash
+LOAD_IP=$(terraform output -raw load_test_public_ip)
+DATA_PRIVATE=$(terraform output -raw data_server_private_ip)
+
+# Запустите туннель в отдельном терминале
+ssh -L 8080:$DATA_PRIVATE:8080 root@$LOAD_IP -N
+
+# Теперь на локальном компьютере:
+curl -X POST http://localhost:8080/v1/statement \
   -H "Content-Type: application/json" \
   -d '{"query": "SELECT COUNT(*) FROM iceberg.warehouse.bonus_registry"}'
 ```
 
-Или установите Trino CLI локально для удобной работы.
+Через Load Test Server (из внутренней сети):
+
+```bash
+LOAD_IP=$(terraform output -raw load_test_public_ip)
+DATA_PRIVATE=$(terraform output -raw data_server_private_ip)
+
+ssh root@$LOAD_IP "curl -X POST http://$DATA_PRIVATE:8080/v1/statement \
+  -H 'Content-Type: application/json' \
+  -d '{\"query\": \"SELECT COUNT(*) FROM iceberg.warehouse.bonus_registry\"}'"
+```
+
+Или установите Trino CLI локально для удобной работы (используйте `http://localhost:8080` после запуска SSH туннеля).
 
 ### Просмотр логов сервисов
 
 ```bash
-DATA_IP=$(terraform output -raw data_server_public_ip)
 LOAD_IP=$(terraform output -raw load_test_public_ip)
+DATA_PRIVATE=$(terraform output -raw data_server_private_ip)
 
 # Docker Compose логи на Data Server
-ssh ubuntu@$DATA_IP 'cd /opt/IcebergTrinoResearch/samples-generation && docker compose -f compose/docker-compose.yml logs -f'
+ssh root@$LOAD_IP "ssh root@$DATA_PRIVATE 'cd /opt/IcebergTrinoResearch/samples-generation && docker compose -f compose/docker-compose.yml logs -f'"
 
 # API логи на Load Test Server
-ssh ubuntu@$LOAD_IP 'journalctl -u samples-api -f'
+ssh root@$LOAD_IP 'journalctl -u samples-api -f'
 
 # Queue Worker логи
-ssh ubuntu@$LOAD_IP 'journalctl -u samples-queue-worker -f'
+ssh root@$LOAD_IP 'journalctl -u samples-queue-worker -f'
 ```
 
 ## Следующие шаги

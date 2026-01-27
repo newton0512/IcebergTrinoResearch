@@ -1,0 +1,18 @@
+[Unit]
+Description=samples-generation trino_queue worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{ work_dir }}
+EnvironmentFile=/etc/samples-generation.env
+ExecStart=/usr/bin/pnpm run queue-worker
+Restart=always
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=samples-queue-worker
+
+[Install]
+WantedBy=multi-user.target

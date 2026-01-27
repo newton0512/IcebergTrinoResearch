@@ -1,0 +1,18 @@
+coordinator=true
+node-scheduler.include-coordinator=true
+node.environment=selectel
+http-server.http.port=8080
+
+query.max-memory={{ trino_max_mem_gb }}GB
+query.max-memory-per-node={{ trino_max_mem_gb }}GB
+memory.heap-headroom-per-node=4GB
+
+http-server.http.acceptor-threads=4
+http-server.http.selector-threads=8
+http-server.threads.max=400
+http-server.threads.min=50
+
+query.client.timeout=2h
+
+task.concurrency=8
+task.max-worker-threads=32

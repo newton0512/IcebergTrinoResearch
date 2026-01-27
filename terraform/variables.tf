@@ -61,36 +61,6 @@ variable "ssh_public_key_path" {
   default     = "~/.ssh/id_rsa.pub"
 }
 
-variable "repo_url" {
-  description = "URL публичного git-репозитория, который будет клонирован на ВМ"
-  type        = string
-  default     = "https://github.com/newton0512/IcebergTrinoResearch.git"
-}
-
-variable "repo_ref" {
-  description = "Git ref (branch/tag/commit) для деплоя"
-  type        = string
-  default     = "terraform"
-}
-
-variable "repo_subdir" {
-  description = "Подкаталог в репозитории, где лежит проект (samples-generation)"
-  type        = string
-  default     = "samples-generation"
-}
-
-variable "trino_heap_gb" {
-  description = "Trino JVM heap (GB) для Data Server"
-  type        = number
-  default     = 48
-}
-
-variable "trino_max_direct_memory_gb" {
-  description = "Trino MaxDirectMemorySize (GB)"
-  type        = number
-  default     = 8
-}
-
 variable "selectel_domain" {
   description = "Номер аккаунта Selectel (domain_name)"
   type        = string

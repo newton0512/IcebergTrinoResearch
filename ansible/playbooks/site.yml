@@ -1,0 +1,9 @@
+---
+# Сначала data (Postgres, Trino, MinIO, Nessie, setup:tables, API, queue-worker),
+# затем load (проект, Docker для K6).
+
+- name: Data server
+  import_playbook: data-server.yml
+
+- name: Load test server
+  import_playbook: load-test-server.yml

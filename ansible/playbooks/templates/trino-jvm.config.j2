@@ -1,13 +1,10 @@
--Xmx12G
--Xms6G
--XX:InitialRAMPercentage=50
--XX:MaxRAMPercentage=60
+-Xmx{{ trino_heap_gb }}G
 -XX:+UseG1GC
 -XX:G1HeapRegionSize=32M
 -XX:+ExplicitGCInvokesConcurrent
 -XX:+HeapDumpOnOutOfMemoryError
 -XX:HeapDumpPath=/tmp/trino-heap-dump.hprof
--XX:ReservedCodeCacheSize=256M
+-XX:ReservedCodeCacheSize=512M
 -Djdk.attach.allowAttachSelf=true
 -XX:+ExitOnOutOfMemoryError
--XX:MaxDirectMemorySize=1G
+-XX:MaxDirectMemorySize={{ trino_max_direct_memory_gb }}G

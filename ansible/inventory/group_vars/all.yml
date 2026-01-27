@@ -1,0 +1,26 @@
+---
+# Все переменные. load_public_ip, data_private_ip, load_private_ip подставляет
+# scripts/refresh-inventory.sh (после terraform apply).
+
+ansible_user: root
+ansible_connection: ssh
+ansible_ssh_private_key_file: "~/.ssh/id_rsa_terraform"
+
+# Terraform outputs (обновляет refresh-inventory.sh)
+load_public_ip: "31.129.56.248"
+data_private_ip: "192.168.199.220"
+load_private_ip: "192.168.199.100"
+
+# Репозиторий
+repo_url: "https://github.com/newton0512/IcebergTrinoResearch.git"
+repo_ref: terraform
+# repo_subdir: samples-generation
+
+# Data-server
+data_mount: /data
+api_port: 3000
+trino_heap_gb: 48
+trino_max_direct_memory_gb: 8
+
+# Load-test (K6)
+k6_api_url: "http://{{ data_private_ip }}:3000"

@@ -25,11 +25,4 @@ data_volume_size_gb      = 300  # Data-том для MinIO/Postgres/Nessie да�
 # SSH ключ на локальной машине
 ssh_public_key_path = "~/.ssh/id_rsa_terraform.pub"
 
-# Git-репозиторий для деплоя на ВМ
-repo_url    = "https://github.com/newton0512/IcebergTrinoResearch.git"
-repo_ref    = "terraform"  # branch/tag/commit
-repo_subdir = "samples-generation"
-
-# Настройка Trino под ресурсы Data Server
-trino_heap_gb              = 48  # JVM heap (GB)
-trino_max_direct_memory_gb = 8   # MaxDirectMemorySize (GB)
+# Repo, Trino и прочая конфигурация сервисов — в Ansible (group_vars, playbooks)

@@ -27,13 +27,10 @@ resource "openstack_compute_instance_v2" "data" {
   key_pair          = selectel_vpc_keypair_v2.ssh_key.name
   availability_zone = var.availability_zone
 
-  user_data = templatefile("${path.module}/cloud-init-data-server.yaml.tftpl", {
-    repo_url                   = var.repo_url
-    repo_ref                   = var.repo_ref
-    repo_subdir                = var.repo_subdir
-    trino_heap_gb              = var.trino_heap_gb
-    trino_max_direct_memory_gb = var.trino_max_direct_memory_gb
+  user_data = templatefile("${path.module}/cloud-init-bootstrap.yaml.tftpl", {
+    ssh_public_key = file(var.ssh_public_key_path)
   })
+  config_drive = true
 
   network {
     port = openstack_networking_port_v2.data.id
@@ -74,12 +71,10 @@ resource "openstack_compute_instance_v2" "load" {
   key_pair          = selectel_vpc_keypair_v2.ssh_key.name
   availability_zone = var.availability_zone
 
-  user_data = templatefile("${path.module}/cloud-init-load-test.yaml.tftpl", {
-    repo_url               = var.repo_url
-    repo_ref               = var.repo_ref
-    repo_subdir            = var.repo_subdir
-    data_server_private_ip = openstack_compute_instance_v2.data.access_ip_v4
+  user_data = templatefile("${path.module}/cloud-init-bootstrap.yaml.tftpl", {
+    ssh_public_key = file(var.ssh_public_key_path)
   })
+  config_drive = true
 
   network {
     port = openstack_networking_port_v2.load.id

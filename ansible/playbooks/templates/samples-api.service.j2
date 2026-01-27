@@ -1,0 +1,18 @@
+[Unit]
+Description=samples-generation API server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{ work_dir }}
+EnvironmentFile=/etc/samples-generation.env
+ExecStart=/usr/bin/pnpm run api:server
+Restart=always
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=samples-api
+
+[Install]
+WantedBy=multi-user.target

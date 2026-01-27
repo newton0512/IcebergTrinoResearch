@@ -1,0 +1,63 @@
+---
+# Load-test-server: проект, Docker, docker-compose — только для запуска K6 при тестировании.
+# API и queue-worker на data-server. K6_API_URL=http://{{ data_private_ip }}:3000
+
+- name: Load test server
+  hosts: load_test_server
+  become: true
+  vars:
+    repo_dir: /opt/IcebergTrinoResearch
+
+  tasks:
+    - name: Install packages
+      ansible.builtin.apt:
+        update_cache: true
+        name: [ca-certificates, curl, git, jq, docker.io]
+        state: present
+
+    - name: Create keyring dir for Docker
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Add Docker GPG key
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+        force: true
+
+    - name: Add Docker repository
+      ansible.builtin.apt_repository:
+        repo: "deb [arch={{ ansible_architecture | replace('x86_64','amd64') }} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        filename: docker
+        state: present
+
+    - name: Install docker-compose-plugin
+      ansible.builtin.apt:
+        update_cache: true
+        name: docker-compose-plugin
+        state: present
+
+    - name: Enable and start Docker
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Clone or update repo
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: "{{ repo_dir }}"
+        version: "{{ repo_ref }}"
+        depth: 1
+        force: true
+        update: true
+
+    - name: Hint for running K6
+      ansible.builtin.debug:
+        msg: |
+          To run K6 load tests against API on data-server:
+            cd {{ repo_dir }}
+            K6_API_URL={{ k6_api_url }} docker compose -f compose/docker-compose.yml --profile k6 run --rm k6 run /scripts/<script>.js

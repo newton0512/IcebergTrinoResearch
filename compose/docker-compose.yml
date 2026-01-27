@@ -57,7 +57,7 @@ services:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - E:/s3-data:/data
+      - minio_data:/data
 
   nessie:
     image: ghcr.io/projectnessie/nessie:0.106.0
@@ -76,24 +76,7 @@ services:
     ports:
       - "19120:19120"
     volumes:
-      - E:/nessie:/var/lib/nessie
-
-  trino:
-    image: trinodb/trino:479
-    depends_on:
-      - nessie
-      - create-minio-bucket
-      - create-nessie-ref
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./trino/config.properties:/etc/trino/config.properties:ro
-      - ./trino/jvm.config:/etc/trino/jvm.config:ro
-      - ./trino/catalog/iceberg.properties:/etc/trino/catalog/iceberg.properties:ro
-    deploy:
-      resources:
-        limits:
-          memory: 20G
+      - nessie_data:/var/lib/nessie
 
   trino-fte:
     image: trinodb/trino:479
@@ -241,7 +224,8 @@ volumes:
   pg_primary_data:
   pg_replica1_data:
   pg_replica2_data:
-  # minio_data:
+  minio_data:
+  nessie_data:
   clickhouse_data:
   trino_exchange:
   rabbitmq_data:

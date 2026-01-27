@@ -19,12 +19,3 @@ data_volume_size_gb = 300
 
 # SSH public key path (local machine)
 ssh_public_key_path = "~/.ssh/id_rsa_terraform.pub"
-
-# Repo to deploy on VMs
-repo_url    = "https://github.com/newton0512/IcebergTrinoResearch.git"
-repo_ref    = "terraform"
-repo_subdir = "samples-generation"
-
-# Trino tuning (Data Server)
-trino_heap_gb              = 48
-trino_max_direct_memory_gb = 8

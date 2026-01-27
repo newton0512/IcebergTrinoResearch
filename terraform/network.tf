@@ -1,6 +1,11 @@
 resource "openstack_networking_network_v2" "private_net" {
   name           = "private-network"
   admin_state_up = true
+
+  depends_on = [
+    selectel_vpc_project_v2.project,
+    selectel_iam_serviceuser_v1.openstack
+  ]
 }
 
 resource "openstack_networking_subnet_v2" "private_subnet" {
@@ -11,6 +16,11 @@ resource "openstack_networking_subnet_v2" "private_subnet" {
 
 data "openstack_networking_network_v2" "external_net" {
   external = true
+
+  depends_on = [
+    selectel_vpc_project_v2.project,
+    selectel_iam_serviceuser_v1.openstack
+  ]
 }
 
 resource "openstack_networking_router_v2" "router" {
