@@ -5,7 +5,7 @@ services:
       - postgres
       - minio
       - nessie
-      - trino
+      - trino-fte
       - clickhouse
       - rabbitmq
       - create-minio-bucket
@@ -17,7 +17,7 @@ services:
         echo "Waiting for Postgres..." && (until nc -z postgres 5432; do sleep 1; done)
         echo "Waiting for MinIO..." && (until nc -z minio 9000; do sleep 1; done)
         echo "Waiting for Nessie..." && (until curl -fs http://nessie:19120/; do sleep 1; done)
-        echo "Waiting for Trino..." && (until curl -fs http://trino:8080/v1/info; do sleep 1; done)
+        echo "Waiting for Trino..." && (until curl -fs http://trino-fte:8080/v1/info; do sleep 1; done)
         echo "Waiting for ClickHouse..." && (until curl -fs http://clickhouse:8123/ping; do sleep 1; done)
         echo "Waiting for RabbitMQ..." && (until curl -fs http://rabbitmq:15672/api/overview -u guest:guest; do sleep 1; done)
         echo "All services ready"
@@ -78,7 +78,7 @@ services:
     volumes:
       - nessie_data:/var/lib/nessie
 
-  trino:
+  trino-fte:
     image: trinodb/trino:479
     depends_on:
       - nessie

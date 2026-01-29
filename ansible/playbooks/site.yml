@@ -1,5 +1,5 @@
 ---
-# Сначала data (Postgres, Trino, MinIO, Nessie, setup:tables, API, queue-worker),
+# Сначала data (Postgres, Trino-FTE, MinIO, Nessie, setup:tables, API, queue-worker),
 # затем load (проект, Docker для K6).
 
 - name: Data server

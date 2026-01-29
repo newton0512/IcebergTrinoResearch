@@ -1,5 +1,5 @@
 ---
-# Data-server: проект, Docker (Postgres, MinIO, Nessie, Trino, RabbitMQ),
+# Data-server: проект, Docker (Postgres, MinIO, Nessie, Trino-FTE, RabbitMQ),
 # /data, setup:tables, API, queue-worker.
 # POSTGRES_HOST=127.0.0.1, TRINO_HOST=127.0.0.1.
 
@@ -120,16 +120,16 @@
     - name: Write Trino jvm.config
       ansible.builtin.template:
         src: trino-jvm.config.j2
-        dest: "{{ work_dir }}/compose/trino/jvm.config"
+        dest: "{{ work_dir }}/compose/trino-fte/jvm.config"
 
     - name: Write Trino config.properties
       ansible.builtin.template:
         src: trino-config.properties.j2
-        dest: "{{ work_dir }}/compose/trino/config.properties"
+        dest: "{{ work_dir }}/compose/trino-fte/config.properties"
 
-    - name: Start Docker Compose (postgres, minio, nessie, trino, rabbitmq, init)
+    - name: Start Docker Compose (postgres, minio, nessie, trino-fte, rabbitmq, init)
       ansible.builtin.command:
-        cmd: docker compose -f compose/docker-compose.yml -f compose/docker-compose.override.yml up -d postgres minio create-minio-bucket create-nessie-db nessie create-nessie-ref trino rabbitmq
+        cmd: docker compose -f compose/docker-compose.yml -f compose/docker-compose.override.yml up -d postgres minio create-minio-bucket create-nessie-db nessie create-nessie-ref trino-fte rabbitmq
         chdir: "{{ work_dir }}"
 
     - name: Wait for Postgres

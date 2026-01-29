@@ -160,14 +160,14 @@ Data Server находится во внутренней сети и не име
 LOAD_IP=$(terraform output -raw load_test_public_ip)
 DATA_PRIVATE=$(terraform output -raw data_server_private_ip)
 
-# Пробросить все нужные порты (Trino:8080, MinIO API:9000, MinIO Console:9001)
+# Пробросить все нужные порты (Trino-FTE:8080, MinIO API:9000, MinIO Console:9001)
 ssh -L 8080:$DATA_PRIVATE:8080 \
     -L 9000:$DATA_PRIVATE:9000 \
     -L 9001:$DATA_PRIVATE:9001 \
     root@$LOAD_IP -N
 
 # Теперь на локальном компьютере доступны:
-# - Trino: http://localhost:8080
+# - Trino-FTE: http://localhost:8080
 # - MinIO API: http://localhost:9000
 # - MinIO Console: http://localhost:9001
 ```
@@ -390,9 +390,9 @@ curl http://$LOAD_IP:3000/api/queue/status
 curl http://$LOAD_IP:3000/api/analytics/count
 ```
 
-### 5. Доступ к Trino через SSH портфорвардинг
+### 5. Доступ к Trino-FTE через SSH портфорвардинг
 
-Для удобной работы с Trino через CLI или веб-интерфейс используйте портфорвардинг:
+Для удобной работы с Trino-FTE через CLI или веб-интерфейс используйте портфорвардинг:
 
 ```bash
 LOAD_IP=$(terraform output -raw load_test_public_ip)
@@ -401,7 +401,7 @@ DATA_PRIVATE=$(terraform output -raw data_server_private_ip)
 # Запустите SSH туннель в отдельном терминале
 ssh -L 8080:$DATA_PRIVATE:8080 root@$LOAD_IP -N
 
-# Теперь на локальном компьютере доступен Trino через http://localhost:8080
+# Теперь на локальном компьютере доступен Trino-FTE через http://localhost:8080
 # Можно использовать Trino CLI или открыть веб-интерфейс в браузере
 ```
 
@@ -541,7 +541,7 @@ terraform destroy
 
 - **Два сервера** вместо одного (Data + Load Test)
 - **Автоматический деплой проекта** через cloud-init (git clone + pnpm install)
-- **Docker Compose** для сервисов (Postgres/MinIO/Nessie/Trino)
+- **Docker Compose** для сервисов (Postgres/MinIO/Nessie/Trino-FTE)
 - **Настройка Trino** под конкретные ресурсы сервера
 - **Systemd сервисы** для API и queue-worker
 - **Автоматическое создание таблиц** через oneshot service
@@ -596,7 +596,7 @@ ssh root@$LOAD_IP "curl -X POST http://$DATA_PRIVATE:8080/v1/statement \
   -d '{\"query\": \"SELECT COUNT(*) FROM iceberg.warehouse.bonus_registry\"}'"
 ```
 
-Или установите Trino CLI локально для удобной работы (используйте `http://localhost:8080` после запуска SSH туннеля).
+Или установите Trino CLI локально для удобной работы с Trino-FTE (используйте `http://localhost:8080` после запуска SSH туннеля).
 
 ### Просмотр логов сервисов
 

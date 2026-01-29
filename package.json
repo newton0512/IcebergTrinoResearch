@@ -52,7 +52,6 @@
     "compose:up": "docker compose -f compose/docker-compose.yml --profile single up starter",
     "compose:postgres": "docker compose -f compose/docker-compose.yml up -d postgres",
     "compose:clickhouse": "docker compose -f compose/docker-compose.yml up -d clickhouse",
-    "compose:trino": "docker compose -f compose/docker-compose.yml up -d trino",
     "compose:trino-fte": "docker compose -f compose/docker-compose.yml up -d trino-fte",
     "compose:rabbitmq": "docker compose -f compose/docker-compose.yml up -d rabbitmq",
     "compose:down": "docker compose -f compose/docker-compose.yml down",

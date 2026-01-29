@@ -84,7 +84,7 @@ Two configurations are available:
 - **Standard (20GB):** `trino` - high memory, no spilling
 - **16GB comparison:** `trino-fte` (fault-tolerant execution with disk spilling) and `clickhouse` - both with 16GB limits
 
-See `compose/docker-compose.yml` for container resource limits and `compose/trino/` or `compose/trino-fte/` for Trino-specific settings.
+See `compose/docker-compose.yml` for container resource limits and `compose/trino-fte/` for Trino-specific settings.
 
 ## Quick Start
 
@@ -101,11 +101,8 @@ Or start individual databases:
 ```bash
 pnpm compose:postgres    # PostgreSQL only
 pnpm compose:clickhouse  # ClickHouse only
-pnpm compose:trino       # Trino 20GB, high memory
 pnpm compose:trino-fte   # Trino 16GB, fault-tolerant execution with spill
 ```
-
-> **Note:** `trino` and `trino-fte` share port 8080 - stop one before starting the other.
 
 Stop and clean up:
 
@@ -710,7 +707,7 @@ Services available:
 | ---------- | -------------------------- | --------------------- |
 | PostgreSQL | 5432                       | postgres:postgres     |
 | ClickHouse | 8123 (HTTP), 9009 (native) | default:clickhouse    |
-| Trino      | 8080                       | trino (no password)   |
+| Trino-FTE  | 8080                       | trino (no password)   |
 | MinIO      | 9000 (S3), 9001 (console)  | minioadmin:minioadmin |
 | Nessie     | 19120                      | -                     |
 

@@ -31,7 +31,7 @@ pnpm run compose:up
 
 # Или отдельно:
 pnpm run compose:postgres
-pnpm run compose:trino
+pnpm run compose:trino-fte
 pnpm run compose:rabbitmq
 ```
 
@@ -210,7 +210,7 @@ pnpm run compose:postgres
 
 Убедитесь, что Trino запущен:
 ```bash
-pnpm run compose:trino
+pnpm run compose:trino-fte
 ```
 
 ### Ошибка подключения к RabbitMQ (optimistic режим)
