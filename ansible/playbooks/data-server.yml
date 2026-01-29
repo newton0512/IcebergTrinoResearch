@@ -127,6 +127,32 @@
         src: trino-config.properties.j2
         dest: "{{ work_dir }}/compose/trino-fte/config.properties"
 
+    - name: Verify trino-fte service exists in docker-compose.yml
+      ansible.builtin.shell: |
+        docker compose -f compose/docker-compose.yml config --services | grep -q "^trino-fte$"
+      args:
+        chdir: "{{ work_dir }}"
+      register: trino_fte_check
+      failed_when: false
+      changed_when: false
+
+    - name: Fail if trino-fte service not found
+      ansible.builtin.fail:
+        msg: "Service 'trino-fte' not found in docker-compose.yml. Make sure the file is updated (git pull) and contains 'trino-fte' service name."
+      when: trino_fte_check.rc != 0
+
+    - name: Stop and remove old trino service if exists
+      ansible.builtin.shell: |
+        # Try to stop/remove via docker-compose (if service exists in old compose file)
+        docker compose -f compose/docker-compose.yml -f compose/docker-compose.override.yml stop trino 2>/dev/null || true
+        docker compose -f compose/docker-compose.yml -f compose/docker-compose.override.yml rm -f trino 2>/dev/null || true
+        # Also try direct docker commands in case container exists but service name changed
+        docker stop trino 2>/dev/null || true
+        docker rm -f trino 2>/dev/null || true
+      args:
+        chdir: "{{ work_dir }}"
+      ignore_errors: true
+
     - name: Start Docker Compose (postgres, minio, nessie, trino-fte, rabbitmq, init)
       ansible.builtin.command:
         cmd: docker compose -f compose/docker-compose.yml -f compose/docker-compose.override.yml up -d postgres minio create-minio-bucket create-nessie-db nessie create-nessie-ref trino-fte rabbitmq
