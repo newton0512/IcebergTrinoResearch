@@ -50,6 +50,8 @@ export interface DatetimeGenerator {
 
 export interface UuidGenerator {
   kind: "uuid";
+  /** When true, emit cast(uuid() as varchar) for partition-friendly VARCHAR id (e.g. Iceberg bucket/truncate). */
+  asVarchar?: boolean;
 }
 
 export interface ChoiceByLookupGenerator {

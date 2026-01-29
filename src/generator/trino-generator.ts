@@ -101,8 +101,10 @@ export function generatorToTrinoExpr(
       // from_unixtime returns timestamp
       return `from_unixtime(${String(fromTs)} + CAST(floor(random() * ${String(toTs - fromTs)}) AS BIGINT))`;
     }
-    case "uuid":
-      return "uuid()";
+    case "uuid": {
+      const g = gen as { asVarchar?: boolean };
+      return g.asVarchar ? "cast(uuid() as varchar)" : "uuid()";
+    }
   }
 }
 
