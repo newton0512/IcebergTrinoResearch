@@ -8,3 +8,12 @@ services:
   nessie:
     volumes:
       - {{ data_mount }}/nessie:/var/lib/nessie
+  trino-fte:
+    deploy:
+      resources:
+        limits:
+{% if is_production %}
+          memory: 64G
+{% else %}
+          memory: 16G
+{% endif %}

@@ -5,7 +5,8 @@ http-server.http.port=8080
 
 query.max-memory={{ trino_max_mem_gb }}GB
 query.max-memory-per-node={{ trino_max_mem_gb }}GB
-memory.heap-headroom-per-node=4GB
+memory.heap-headroom-per-node={% if is_production %}6GB{% else %}4GB{% endif %}
+query.max-length=10485760
 
 http-server.http.acceptor-threads=4
 http-server.http.selector-threads=8
@@ -14,5 +15,15 @@ http-server.threads.min=50
 
 query.client.timeout=2h
 
-task.concurrency=8
-task.max-worker-threads=32
+task.concurrency={{ trino_concurrency }}
+task.max-worker-threads={{ trino_max_worker_threads }}
+
+{% if not is_production %}
+# Development-specific settings
+query-manager.required-workers=1
+query.max-run-time=15m
+query.max-execution-time=15m
+node-scheduler.max-splits-per-node=100
+node-scheduler.min-pending-splits-per-task=10
+retry-policy=TASK
+{% endif %}

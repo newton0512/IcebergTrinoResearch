@@ -19,8 +19,16 @@ repo_ref: terraform
 # Data-server
 data_mount: /data
 api_port: 3000
-trino_heap_gb: 48
-trino_max_direct_memory_gb: 8
+
+# Environment type
+is_production: true  # false для локальной разработки, true для сервера
+
+# Trino settings
+trino_heap_gb: 32
+trino_max_direct_memory_gb: 16
+trino_max_mem_gb: 24
+trino_concurrency: 16
+trino_max_worker_threads: 64
 
 # Load-test (K6)
 k6_api_url: "http://{{ data_private_ip }}:3000"
