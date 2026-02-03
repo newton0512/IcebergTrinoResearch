@@ -280,7 +280,7 @@ export async function createBonusRegistryTableInTrino(
     ) WITH (
       format = 'PARQUET',
       format_version = 2,
-      partitioning = 'bucket(accounted_for_bs_profile_id, 32)'
+      partitioning = ARRAY['bucket(accounted_for_bs_profile_id, 32)']
     )
   `;
 
