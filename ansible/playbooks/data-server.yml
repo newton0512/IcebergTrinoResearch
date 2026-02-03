@@ -9,7 +9,8 @@
   vars:
     repo_dir: /opt/IcebergTrinoResearch
     work_dir: "{{ repo_dir }}"
-    trino_max_mem_gb: "{{ [trino_heap_gb - 8, 1] | max }}"
+    # Trino: query.max-memory-per-node + heap headroom (30%) должны быть < heap → задаём max_mem не более 70% heap
+    trino_max_mem_gb: "{{ [(trino_heap_gb * 0.7) | int, 1] | max }}"
     postgres_host: "127.0.0.1"
     trino_host: "127.0.0.1"
     rabbitmq_host: "127.0.0.1"
