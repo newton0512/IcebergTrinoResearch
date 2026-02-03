@@ -265,11 +265,12 @@
         src: samples-queue-worker.service.j2
         dest: /etc/systemd/system/samples-queue-worker.service
 
-    - name: systemctl daemon-reload and enable/start API and queue-worker
+    # Сервисы оставляем без автозапуска; запускаться будут вручную при необходимости
+    - name: Disable samples services (no auto-start)
       ansible.builtin.systemd:
         name: "{{ item }}"
-        state: started
-        enabled: true
+        enabled: false
+        state: stopped
         daemon_reload: true
       loop:
         - samples-api
