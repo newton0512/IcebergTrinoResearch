@@ -1,6 +1,8 @@
 /**
  * Скрипт для записи данных через HybridWriter с очередью.
  * Работает непрерывно до прерывания (Ctrl+C).
+ * Одна из 10 записей использует ранее добавленный accounted_for_bs_profile_id;
+ * накопленные id сохраняются в data/accounted_for_bs_profile_ids.json для последующих запросов.
  *
  * Параметры:
  *   --pause-from, --pause-to    пауза между батчами, мс (default: 100..2000)
@@ -15,8 +17,15 @@
  *   pnpm tsx scripts/write-with-queue.ts -d
  */
 
-import { HybridWriterWithQueue, getHybridWriterWithQueueConfig } from "../src/hybrid-writer-with-ps-query/hybrid-writer.js";
+import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { HybridWriterWithQueue, getHybridWriterWithQueueConfig, type ProfileIdPool } from "../src/hybrid-writer-with-ps-query/hybrid-writer.js";
 import { connectPostgres, getPostgresConfig } from "../src/hybrid-writer/utils.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PROFILE_IDS_FILE = path.join(__dirname, "..", "data", "accounted_for_bs_profile_ids.json");
+const SAVE_EVERY_ROUNDS = 5;
 
 function parseArg(name: string, defaultValue: number): number {
   const re = new RegExp(`^--${name}=(\\d+)$`, "i");
@@ -44,6 +53,26 @@ function randomInt(from: number, to: number): number {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function loadProfileIds(): string[] {
+  try {
+    const raw = readFileSync(PROFILE_IDS_FILE, "utf-8");
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveProfileIds(ids: string[]): void {
+  try {
+    const dir = path.dirname(PROFILE_IDS_FILE);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(PROFILE_IDS_FILE, JSON.stringify(ids, null, 2), "utf-8");
+  } catch (e) {
+    logError("Failed to save profile ids:", e);
+  }
 }
 
 /**
@@ -90,13 +119,29 @@ async function main(): Promise<void> {
   const config = getHybridWriterWithQueueConfig();
   const writer = new HybridWriterWithQueue(config);
 
+  const profileIdPool: ProfileIdPool = {
+    ids: loadProfileIds(),
+    reuseProbability: 0.1,
+  };
+  if (profileIdPool.ids.length > 0) {
+    console.log(`Loaded ${profileIdPool.ids.length} accounted_for_bs_profile_id(s) for reuse (1 of 10)\n`);
+  }
+
   let stopped = false;
+
+  const savePool = (): void => {
+    if (profileIdPool.ids.length > 0) {
+      saveProfileIds(profileIdPool.ids);
+      console.log(`Saved ${profileIdPool.ids.length} accounted_for_bs_profile_id(s) to ${PROFILE_IDS_FILE}`);
+    }
+  };
 
   const onSignal = async (): Promise<void> => {
     if (stopped) return;
     stopped = true;
     console.log("\n\nStopping... (Ctrl+C again to force)");
     try {
+      savePool();
       await writer.disconnect();
       console.log("Disconnected.");
     } catch (e) {
@@ -127,15 +172,19 @@ async function main(): Promise<void> {
       const pauseMs = randomInt(pauseFrom, pauseTo);
 
       const writeStart = Date.now();
-      const results = await writer.writeBatch(batchSize, {}, 10);
+      const results = await writer.writeBatch(batchSize, { profileIdPool }, 10);
       const writeDuration = Date.now() - writeStart;
       const ok = results.length;
       const err = batchSize - ok;
       totalWritten += ok;
 
+      if (round % SAVE_EVERY_ROUNDS === 0 && profileIdPool.ids.length > 0) {
+        savePool();
+      }
+
       const errSuffix = err > 0 ? ` ${String(err)} err` : "";
       console.log(
-        `[${String(round)}] pause=${String(pauseMs)}ms batch=${String(batchSize)} write=${String(writeDuration)}ms${errSuffix}`
+        `[${String(round)}] pause=${String(pauseMs)}ms batch=${String(batchSize)} write=${String(writeDuration)}ms pool=${String(profileIdPool.ids.length)}${errSuffix}`
       );
 
       await sleep(pauseMs);
@@ -149,6 +198,7 @@ async function main(): Promise<void> {
     logError("============================================================");
     throw error;
   } finally {
+    savePool();
     await writer.disconnect();
   }
 }

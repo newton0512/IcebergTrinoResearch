@@ -66,6 +66,12 @@ export interface WriteResult {
   queueId: number;
 }
 
+/** Пул учтённых profile_id: для части записей подставляем существующий вместо нового. */
+export interface ProfileIdPool {
+  ids: string[];
+  reuseProbability: number;
+}
+
 export class HybridWriterWithQueue {
   private config: HybridWriterConfig;
   private sql: Sql | null = null;
@@ -163,12 +169,13 @@ export class HybridWriterWithQueue {
    * 4. Генерируем баланс как случайное число от -1000 до +10000. Записываем в bonus_registry_balance_check. при успехе продолжаем, при ошибке ролбэк саги
    * 5. Вызываем bonus_registry_faker(), дополняем полученный объект полями из сообщения и записываем все это в trino_queue
    */
-  async write(options: { verbose?: boolean } = {}): Promise<WriteResult> {
+  async write(options: { verbose?: boolean; profileIdPool?: ProfileIdPool } = {}): Promise<WriteResult> {
     if (!this.sql) {
       throw new Error("Not connected. Call connect() first.");
     }
 
     const verbose = options.verbose ?? false;
+    const profileIdPool = options.profileIdPool;
 
     // Создаем отдельный экземпляр SagaManager для каждого вызова write()
     // Это необходимо для поддержки параллельных вызовов
@@ -331,6 +338,13 @@ export class HybridWriterWithQueue {
         amount,
       };
 
+      // Одна из N записей использует ранее добавленный accounted_for_bs_profile_id
+      if (profileIdPool && profileIdPool.reuseProbability > 0 && profileIdPool.ids.length > 0 && Math.random() < profileIdPool.reuseProbability) {
+        finalData.accounted_for_bs_profile_id = profileIdPool.ids[Math.floor(Math.random() * profileIdPool.ids.length)]!;
+      } else if (profileIdPool) {
+        profileIdPool.ids.push(fakerData.accounted_for_bs_profile_id);
+      }
+
       // 6. Записываем в trino_queue в рамках саги
       // Сохраняем queueId в переменной для доступа после выполнения саги
       let queueId: number | null = null;
@@ -440,7 +454,7 @@ export class HybridWriterWithQueue {
    */
   async writeBatch(
     count: number,
-    options: { verbose?: boolean } = {},
+    options: { verbose?: boolean; profileIdPool?: ProfileIdPool } = {},
     concurrency: number = 10
   ): Promise<WriteResult[]> {
     const results: WriteResult[] = [];

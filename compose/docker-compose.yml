@@ -31,7 +31,8 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      # PostgreSQL 18+ ожидает монт в /var/lib/postgresql (образ использует подкаталог версии внутри)
+      - pg_data:/var/lib/postgresql
     # Tuned for bulk insert performance (dev/testing only)
     command: >
       postgres
