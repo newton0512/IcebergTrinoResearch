@@ -179,7 +179,7 @@
 
     - name: Show Trino logs (diagnostics before wait)
       ansible.builtin.command:
-        cmd: docker compose -f compose/docker-compose.yml -f compose/docker-compose.override.yml logs trino-fte --tail 80
+        cmd: docker compose -f compose/docker-compose.yml -f compose/docker-compose.override.yml logs trino-fte --tail 200
       args:
         chdir: "{{ work_dir }}"
       register: trino_logs

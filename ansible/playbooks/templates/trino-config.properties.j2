@@ -5,7 +5,8 @@ http-server.http.port=8080
 
 query.max-memory={{ trino_max_mem_gb }}GB
 query.max-memory-per-node={{ trino_max_mem_gb }}GB
-# memory.heap-headroom-per-node — не задаём: по умолчанию 30% от heap (в 479 явное значение может вызывать ошибку парсинга)
+query.max-total-memory={{ trino_max_mem_gb * 2 }}GB
+# memory.heap-headroom-per-node — не задаём: по умолчанию 30% от heap
 query.max-length=10485760
 
 http-server.http.acceptor-threads=4
