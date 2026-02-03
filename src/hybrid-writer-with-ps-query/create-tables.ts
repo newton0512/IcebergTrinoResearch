@@ -269,6 +269,8 @@ export async function createBonusRegistryTableInTrino(
     "operation_doc_type_id VARCHAR",
     "is_merged BOOLEAN",
     "merged_date DATE",
+    "created_at TIMESTAMP",
+    "ingested_at TIMESTAMP",
   ].join(", ");
 
   // Партиционирование по bs_profile_id и date

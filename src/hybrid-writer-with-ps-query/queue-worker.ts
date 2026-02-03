@@ -341,7 +341,7 @@ export class QueueWorker {
     const escapedTable = escapeTrinoIdentifier(table.toLowerCase());
     const fullTableName = `${escapedCatalog}.${escapedSchema}.${escapedTable}`;
 
-    // Используем фиксированный список колонок (как в utils.ts)
+    // Используем фиксированный список колонок (как в utils.ts + created_at, ingested_at)
     const columns = [
       "id", "date", "registrar_type_id", "registrar_id", "row",
       "manager_id", "bs_profile_id", "accounted_for_bs_profile_id",
@@ -358,6 +358,7 @@ export class QueueWorker {
       "active_by_trips", "is_empty", "amount_calculation",
       "distance", "addition_amount", "operation_doc_type_id",
       "is_merged", "merged_date",
+      "created_at", "ingested_at",
     ];
 
     // Формируем VALUES для всех записей
@@ -417,6 +418,8 @@ export class QueueWorker {
         data.operation_doc_type_id ? `CAST(${escapeTrinoLiteral(String(data.operation_doc_type_id))} AS VARCHAR)` : "CAST(NULL AS VARCHAR)",
         data.is_merged !== null && data.is_merged !== undefined ? `CAST(${data.is_merged ? "TRUE" : "FALSE"} AS BOOLEAN)` : "CAST(NULL AS BOOLEAN)",
         data.merged_date ? `CAST(${escapeTrinoLiteral(this.formatDate(new Date(data.merged_date as string)))} AS DATE)` : "CAST(NULL AS DATE)",
+        data.created_at ? `TIMESTAMP '${this.formatTimestamp(new Date(data.created_at as string))}'` : "CAST(NULL AS TIMESTAMP)",
+        "CURRENT_TIMESTAMP",
       ];
       return `(${values.join(", ")})`;
     });

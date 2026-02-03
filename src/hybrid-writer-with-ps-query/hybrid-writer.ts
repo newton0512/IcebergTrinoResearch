@@ -181,11 +181,12 @@ export class HybridWriterWithQueue {
     // Это необходимо для поддержки параллельных вызовов
     const sagaManager = new SagaManager(this.sql);
 
-    // 1. Открываем сагу
+    // 1. Открываем сагу (время рождения события = created_at для Iceberg)
     const sagaBeginStart = Date.now();
     const sagaId = await sagaManager.beginSaga({
       description: "Write bonus registry entry to queue",
     });
+    const created_at = new Date().toISOString();
     const sagaBeginDuration = Date.now() - sagaBeginStart;
     if (verbose) {
       console.log(`  ⏱ Saga opened: ${sagaId} (${sagaBeginDuration}ms)`);
@@ -324,18 +325,20 @@ export class HybridWriterWithQueue {
         console.log(`  ⏱ Generated faker data (${fakerDuration}ms)`);
       }
 
-      // Формирование финального объекта для записи в Trino
+      // Формирование финального объекта для записи в Trino (created_at = время рождения события на старте саги)
       const finalData: BonusRegistryFakerObject & {
         registrar_type_id: string;
         registrar_id: string;
         row: number;
         amount: number;
+        created_at: string;
       } = {
         ...fakerData,
         registrar_type_id,
         registrar_id,
         row,
         amount,
+        created_at,
       };
 
       // Одна из N записей использует ранее добавленный accounted_for_bs_profile_id
