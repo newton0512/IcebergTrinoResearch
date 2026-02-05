@@ -7,9 +7,9 @@ ansible_connection: ssh
 ansible_ssh_private_key_file: "~/.ssh/id_rsa_terraform"
 
 # Terraform outputs (обновляет refresh-inventory.sh)
-load_public_ip: "87.228.17.190"
-data_private_ip: "192.168.199.34"
-load_private_ip: "192.168.199.95"
+load_public_ip: "31.129.63.20"
+data_private_ip: "192.168.199.190"
+load_private_ip: "192.168.199.32"
 
 # Репозиторий
 repo_url: "https://github.com/newton0512/IcebergTrinoResearch.git"

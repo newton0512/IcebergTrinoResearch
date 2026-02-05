@@ -4,8 +4,10 @@
  */
 
 export const BONUS_REGISTRY_PARTITIONING_TABLE_NAMES = [
+  "bonus_registry_bucket16",
   "bonus_registry_bucket32",
   "bonus_registry_bucket64",
+  "bonus_registry_bucket128",
 ] as const;
 
 export type BonusRegistryPartitioningTableName =

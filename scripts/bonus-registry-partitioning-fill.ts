@@ -10,6 +10,7 @@
 import { parseArgs } from "node:util";
 import { BasicAuth, Trino } from "trino-client";
 import { escapeTrinoIdentifier } from "../src/generator/escape.js";
+import type { BonusRegistryPartitioningTableName } from "./bonus-registry-partitioning-common.js";
 import {
   getPartitioningTrinoConfig,
   BONUS_REGISTRY_PARTITIONING_TABLE_NAMES,
@@ -46,6 +47,36 @@ async function runTrinoStatement(
   }
 }
 
+/** Из имени таблицы bonus_registry_bucketN извлекает N (16, 32, 64, 128). */
+function getBucketCount(tableName: BonusRegistryPartitioningTableName): number {
+  const match = /^bonus_registry_bucket(\d+)$/.exec(tableName);
+  if (!match) return 32;
+  return Number.parseInt(match[1]!, 10);
+}
+
+interface TrinoRowResult {
+  data?: unknown[][];
+  columns?: { name: string }[];
+  error?: { message: string };
+}
+
+async function runTrinoQuery(
+  trino: Trino,
+  sql: string,
+  label: string
+): Promise<TrinoRowResult[]> {
+  const out: TrinoRowResult[] = [];
+  const q = await trino.query(sql);
+  for await (const result of q) {
+    const r = result as TrinoRowResult;
+    if (r?.error) {
+      throw new Error(`${label}: ${r.error.message ?? "unknown"}\nSQL: ${sql}`);
+    }
+    out.push(r);
+  }
+  return out;
+}
+
 async function main(): Promise<void> {
   const { values } = parseArgs({
     options: {
@@ -63,7 +94,7 @@ Usage: pnpm tsx scripts/bonus-registry-partitioning-fill.ts [options]
 Options:
   -r, --rows <n>        Number of rows per table (default: ${DEFAULT_ROWS.toLocaleString()})
   -b, --batch-size <n>  Batch size for INSERT (default: ${DEFAULT_BATCH_SIZE.toLocaleString()})
-  -t, --truncate        Truncate both tables before filling
+  -t, --truncate        Truncate all tables before filling
   -h, --help            Show this help
 
 Examples:
@@ -157,6 +188,52 @@ Examples:
 
       const tableMs = Math.round(performance.now() - tableStart);
       console.log(`✓ ${tableName}: ${inserted.toLocaleString()} rows in ${tableMs.toLocaleString()} ms\n`);
+    }
+
+    console.log("--- Bucket distribution (count and % per bucket) ---\n");
+    for (const tableName of BONUS_REGISTRY_PARTITIONING_TABLE_NAMES) {
+      const full = fullTableName(config.catalog, config.schema, tableName);
+      const bucketCount = getBucketCount(tableName);
+      const bucketExpr = `mod(abs(from_big_endian_64(xxhash64(to_utf8(accounted_for_bs_profile_id)))), ${String(bucketCount)})`;
+      const distSql = `
+        SELECT bucket, cnt, pct
+        FROM (
+          SELECT
+            ${bucketExpr} AS bucket,
+            COUNT(*) AS cnt,
+            ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS pct
+          FROM ${full}
+          GROUP BY ${bucketExpr}
+        ) t
+        ORDER BY bucket
+      `;
+      try {
+        const results = await runTrinoQuery(trino, distSql, `bucket dist ${tableName}`);
+        const rows: { bucket: number; cnt: number; pct: number }[] = [];
+        for (const r of results) {
+          if (!r.data) continue;
+          for (const row of r.data) {
+            if (row.length >= 3 && row[0] != null && row[1] != null && row[2] != null) {
+              rows.push({
+                bucket: Number(row[0]),
+                cnt: Number(row[1]),
+                pct: Number(row[2]),
+              });
+            }
+          }
+        }
+        const totalRows = rows.reduce((s, x) => s + x.cnt, 0);
+        console.log(`${tableName} (${rows.length} buckets, ${totalRows.toLocaleString()} rows):`);
+        const pctCol = rows.map((x) => `b${x.bucket}=${x.cnt.toLocaleString()} (${String(x.pct)}%)`);
+        if (rows.length <= 20) {
+          console.log("  " + pctCol.join(" | "));
+        } else {
+          console.log("  " + pctCol.slice(0, 8).join(" | ") + " | ... | " + pctCol.slice(-8).join(" | "));
+        }
+        console.log("");
+      } catch (err) {
+        console.warn(`  ${tableName}: bucket distribution failed:`, err instanceof Error ? err.message : err);
+      }
     }
 
     console.log("✓ Fill done.");

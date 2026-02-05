@@ -273,7 +273,6 @@ export async function createBonusRegistryTableInTrino(
     "ingested_at TIMESTAMP",
   ].join(", ");
 
-  // Партиционирование по bs_profile_id и date
   const createTableSql = `
     CREATE TABLE IF NOT EXISTS ${fullTableName} (
       ${columns}

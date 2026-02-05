@@ -73,8 +73,10 @@ const TABLE_SPECS: ReadonlyArray<{
   name: (typeof BONUS_REGISTRY_PARTITIONING_TABLE_NAMES)[number];
   partitioning: string;
 }> = [
+  { name: "bonus_registry_bucket16", partitioning: "bucket(accounted_for_bs_profile_id, 16)" },
   { name: "bonus_registry_bucket32", partitioning: "bucket(accounted_for_bs_profile_id, 32)" },
   { name: "bonus_registry_bucket64", partitioning: "bucket(accounted_for_bs_profile_id, 64)" },
+  { name: "bonus_registry_bucket128", partitioning: "bucket(accounted_for_bs_profile_id, 128)" },
 ];
 
 async function executeQuery(
