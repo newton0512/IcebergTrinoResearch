@@ -58,7 +58,7 @@ function buildQueryDefs(fullTable: string): QueryDef[] {
     {
       id: 2,
       name: "Пагинация по профилю",
-      sqlTemplate: `SELECT * FROM ${T} WHERE accounted_for_bs_profile_id = $1 ORDER BY "date" DESC LIMIT $2 OFFSET $3`,
+      sqlTemplate: `SELECT * FROM ${T} WHERE accounted_for_bs_profile_id = $1 ORDER BY "date" DESC OFFSET $2 ROWS LIMIT $3`,
       paramCount: 3,
     },
     {
@@ -100,7 +100,7 @@ function buildQueryDefs(fullTable: string): QueryDef[] {
     {
       id: 9,
       name: "Общая пагинация",
-      sqlTemplate: `SELECT * FROM ${T} ORDER BY "date" DESC LIMIT $1 OFFSET $2`,
+      sqlTemplate: `SELECT * FROM ${T} ORDER BY "date" DESC OFFSET $1 ROWS LIMIT $2`,
       paramCount: 2,
     },
     {
@@ -366,7 +366,7 @@ function getParamsForRun(
       const profileId = prep.profileIds[runIndex % prep.profileIds.length];
       const limit = 20;
       const offset = (runIndex * 10) % 5000;
-      return [profileId ?? "bench", limit, offset];
+      return [profileId ?? "bench", offset, limit];
     }
     case 3:
       return [prep.profileIds[runIndex % prep.profileIds.length] ?? "bench"];
@@ -388,7 +388,7 @@ function getParamsForRun(
     }
     case 9: {
       const pair = prep.q9Rows[runIndex % prep.q9Rows.length];
-      return pair ? [pair[0], pair[1]] : [20, 0];
+      return pair ? [pair[1], pair[0]] : [0, 20];
     }
     case 10: {
       const id = prep.ids.length > 0 ? prep.ids[runIndex % prep.ids.length] : "";
