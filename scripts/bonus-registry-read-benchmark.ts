@@ -1,6 +1,6 @@
 /**
- * Бенчмарк чтения по id для таблиц bonus_registry с разным партиционированием.
- * По умолчанию перед тестом выполняется optimize по всем таблицам.
+ * Бенчмарк чтения по полю партиционирования accounted_for_bs_profile_id для таблиц
+ * bonus_registry с разным партиционированием. По умолчанию перед тестом выполняется optimize.
  *
  * Запуск:
  *   pnpm tsx scripts/bonus-registry-read-benchmark.ts
@@ -90,7 +90,10 @@ async function getTableRowCount(
   return 0;
 }
 
-async function collectIds(
+/** Поле партиционирования для bonus_registry (используется в SELECT и WHERE). */
+const PARTITION_COLUMN = "accounted_for_bs_profile_id";
+
+async function collectPartitionKeyValues(
   trino: Trino,
   catalog: string,
   schema: string,
@@ -103,51 +106,48 @@ async function collectIds(
   if (rowCount === 0) {
     return [];
   }
-  // Процент выборки: чтобы получить примерно limit строк, берём (limit / rowCount) * 100,
-  // с ограничениями и небольшим запасом (×1.5), т.к. SYSTEM даёт приблизительный объём.
   const rawPercent = (limit / rowCount) * 100 * 1.5;
   const percent = Math.min(
     SAMPLE_PERCENT_MAX,
     Math.max(SAMPLE_PERCENT_MIN, rawPercent)
   );
   log?.(`  rows: ${rowCount.toLocaleString()}, TABLESAMPLE SYSTEM (${percent.toFixed(2)}%), limit ${String(limit)}`);
-  let sql = `SELECT id FROM ${full} TABLESAMPLE SYSTEM (${String(percent)}) LIMIT ${String(limit)}`;
+  let sql = `SELECT ${PARTITION_COLUMN} FROM ${full} TABLESAMPLE SYSTEM (${String(percent)}) LIMIT ${String(limit)}`;
   let results = await consumeQuery(trino, sql);
-  const ids: string[] = [];
+  const values: string[] = [];
   for (const r of results) {
     if (!r.data) continue;
     for (const row of r.data) {
       if (row.length > 0 && row[0] != null) {
-        ids.push(String(row[0]));
+        values.push(String(row[0]));
       }
     }
   }
-  // TABLESAMPLE SYSTEM при малом проценте может вернуть 0 строк (блочная выборка). Fallback на ORDER BY random().
-  if (ids.length === 0 && rowCount > 0) {
+  if (values.length === 0 && rowCount > 0) {
     log?.("  TABLESAMPLE returned 0 rows, using ORDER BY random()");
-    sql = `SELECT id FROM ${full} ORDER BY random() LIMIT ${String(limit)}`;
+    sql = `SELECT ${PARTITION_COLUMN} FROM ${full} ORDER BY random() LIMIT ${String(limit)}`;
     results = await consumeQuery(trino, sql);
     for (const r of results) {
       if (!r.data) continue;
       for (const row of r.data) {
         if (row.length > 0 && row[0] != null) {
-          ids.push(String(row[0]));
+          values.push(String(row[0]));
         }
       }
     }
   }
-  return ids;
+  return values;
 }
 
-async function measureSelectById(
+async function measureSelectByPartitionKey(
   trino: Trino,
   catalog: string,
   schema: string,
   table: string,
-  id: string
+  partitionKeyValue: string
 ): Promise<number> {
   const full = fullTableName(catalog, schema, table);
-  const sql = `SELECT * FROM ${full} WHERE id = ${escapeTrinoLiteral(id)} LIMIT 1`;
+  const sql = `SELECT * FROM ${full} WHERE ${PARTITION_COLUMN} = ${escapeTrinoLiteral(partitionKeyValue)} LIMIT 1`;
   const start = performance.now();
   await consumeQuery(trino, sql);
   return performance.now() - start;
@@ -175,7 +175,7 @@ async function main(): Promise<void> {
 Usage: pnpm tsx scripts/bonus-registry-read-benchmark.ts [options]
 
 Options:
-  -n, --samples <n>   Number of random IDs to query per table (default: ${DEFAULT_SAMPLES})
+  -n, --samples <n>   Number of random partition-key values to query per table (default: ${DEFAULT_SAMPLES})
   -o, --optimize      Run optimize on all tables before benchmark (default: true)
   --no-optimize       Skip optimize before benchmark
   -h, --help          Show this help
@@ -230,8 +230,8 @@ Examples:
     > = {};
 
     for (const tbl of BONUS_REGISTRY_PARTITIONING_TABLE_NAMES) {
-      console.log(`Sampling ${samples} random IDs from ${tbl}...`);
-      const ids = await collectIds(
+      console.log(`Sampling ${samples} random ${PARTITION_COLUMN} values from ${tbl}...`);
+      const partitionKeyValues = await collectPartitionKeyValues(
         trino,
         config.catalog,
         config.schema,
@@ -239,21 +239,21 @@ Examples:
         samples,
         console.log
       );
-      if (ids.length === 0) {
+      if (partitionKeyValues.length === 0) {
         throw new Error(
           `No rows in ${tbl}; run bonus-registry-partitioning-fill first.`
         );
       }
-      console.log(`Got ${ids.length} IDs. Benchmarking ${tbl}... `);
+      console.log(`Got ${partitionKeyValues.length} values. Benchmarking ${tbl}... `);
 
       const times: number[] = [];
-      for (const id of ids) {
-        const ms = await measureSelectById(
+      for (const value of partitionKeyValues) {
+        const ms = await measureSelectByPartitionKey(
           trino,
           config.catalog,
           config.schema,
           tbl,
-          id
+          value
         );
         times.push(ms);
       }
