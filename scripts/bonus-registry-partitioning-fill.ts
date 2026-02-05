@@ -1,10 +1,13 @@
 /**
- * Проверка/создание таблиц bonus_registry с партиционированием и заполнение обеих батчами.
+ * Проверка/создание таблиц bonus_registry с партиционированием и заполнение батчами.
  * Данные генерируются в каждую таблицу отдельно (не копируются из одной в другую).
+ *
+ * При ошибке "Error committing write to Parquet file" уменьшите --batch-size (например 50000 или 10000):
+ * большие батчи (сотни тысяч строк) могут приводить к OOM или сбою записи на воркере Trino.
  *
  * Запуск:
  *   pnpm tsx scripts/bonus-registry-partitioning-fill.ts [--rows 1000000] [--batch-size 50000]
- *   pnpm tsx scripts/bonus-registry-partitioning-fill.ts --truncate --rows 500000
+ *   pnpm tsx scripts/bonus-registry-partitioning-fill.ts --truncate --rows 100000000 --batch-size 50000
  */
 
 import { parseArgs } from "node:util";

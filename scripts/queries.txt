@@ -1,0 +1,27 @@
+1. Списания по документу и проводке (DocumentBaseService, isEmpty)
+С accountedForBsProfileId, фильтр по документу и типу бонуса.
+SELECT "amount"FROM "BsBonusRegistryEntry"WHERE "docToTrackId" = $1  AND "docToTrackTypeId" = $2  AND "accountedForBsProfileId" = $3  AND "bonusTypeId" = $4  AND "amount" < 0  AND "cancelled" = false  AND ("dateOfExpire" IS NULL OR "dateOfExpire" >= $5);
+2. Пагинация с accountedForBsProfileId (список записей профиля по страницам)
+SELECT *FROM "BsBonusRegistryEntry"WHERE "accountedForBsProfileId" = $1ORDER BY "date" DESCLIMIT $2 OFFSET $3;
+3. Записи по профилю, без отменённых (getAllByAccountedForBsProfileId)
+С accountedForBsProfileId, фильтр.
+SELECT *FROM "BsBonusRegistryEntry"WHERE "accountedForBsProfileId" = $1  AND "cancelled" = false;
+4. Записи по bsProfileId (getAllByBsProfileId)
+Без accountedForBsProfileId, только фильтр.
+SELECT *FROM "BsBonusRegistryEntry"WHERE "bsProfileId" = $1  AND "cancelled" = false;
+5. Записи по профилю и типу бонуса (getAllByAccountedForBsProfileIdAndBonusTypeId)
+С accountedForBsProfileId, два поля в фильтре.
+SELECT *FROM "BsBonusRegistryEntry"WHERE "accountedForBsProfileId" = $1  AND "cancelled" = false  AND "bonusTypeId" = $2;
+6. Действующие записи по профилю (getBonusEntriesWithinValidityByProfileId)
+С accountedForBsProfileId, фильтр по дате.
+SELECT *FROM "BsBonusRegistryEntry"WHERE "accountedForBsProfileId" = $1  AND "dateOfExpire" >= $2;
+7. Группировка по квоте (AdditionalBsQuotasService.groupBy)
+Без accountedForBsProfileId, группировка и счётчик.
+SELECT "bsQuotaId", COUNT("bsQuotaId") AS "_count_bsQuotaId"FROM "BsBonusRegistryEntry"WHERE "registrarTypeId" = $1  AND "cancelled" = false  AND "bsQuotaId" IS NOT NULL  AND "row" = 1GROUP BY "bsQuotaId";
+8. Записи по документу (relatedEntries по registrarTypeId/registrarId)
+Без accountedForBsProfileId, фильтр по регистратору.
+SELECT *FROM "BsBonusRegistryEntry"WHERE "registrarTypeId" = $1  AND "registrarId" = $2;
+9. Пагинация без accountedForBsProfileId (общий список с сортировкой)
+SELECT *FROM "BsBonusRegistryEntry"ORDER BY "date" DESCLIMIT $1 OFFSET $2;
+10. Одна запись по id (get / findOne)
+SELECT *FROM "BsBonusRegistryEntry"WHERE "id" = $1LIMIT 1;

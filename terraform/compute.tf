@@ -17,7 +17,7 @@ resource "openstack_blockstorage_volume_v3" "load_boot" {
 resource "openstack_blockstorage_volume_v3" "data_volume" {
   name              = "iceberg-data-volume-${var.environment_name}"
   size              = var.data_volume_size_gb
-  volume_type       = "${var.disk_type}.${var.availability_zone}"
+  volume_type       = "${var.data_volume_disk_type}.${var.availability_zone}"
   availability_zone = var.availability_zone
 }
 

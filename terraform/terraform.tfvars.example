@@ -17,10 +17,11 @@ disk_type         = "fast"
 data_flavor_id = "1019" # 16 vCPU / 64GB (пример для Data Server)
 load_flavor_id = "2011" # 4 vCPU / 8GB (пример для Load Test Server)
 
-# Размеры дисков (GB)
+# Размеры и тип дисков (GB)
 data_boot_disk_size_gb   = 50   # Загрузочный диск Data Server
 load_boot_disk_size_gb   = 50   # Загрузочный диск Load Test Server
 data_volume_size_gb      = 300  # Data-том для MinIO/Postgres/Nessie данных
+data_volume_disk_type    = "fast"  # Тип диска data-тома (S3/MinIO на нём; fast = быстрый/NVMe)
 
 # SSH ключ на локальной машине
 ssh_public_key_path = "~/.ssh/id_rsa_terraform.pub"

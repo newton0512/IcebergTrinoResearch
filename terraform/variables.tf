@@ -50,9 +50,15 @@ variable "load_boot_disk_size_gb" {
 }
 
 variable "data_volume_size_gb" {
-  description = "Размер data-тома для Data Server (GB) (MinIO + Postgres data + Nessie data)"
+  description = "Размер data-тома для Data Server (GB) (MinIO/S3 + Postgres + Nessie). Монтируется в /data, туда же Ansible привязывает данные контейнеров."
   type        = number
   default     = 300
+}
+
+variable "data_volume_disk_type" {
+  description = "Тип диска для data-тома (MinIO/S3, Postgres, Nessie). Отдельно от disk_type загрузочного диска. Например fast (NVMe) для максимальной скорости записи."
+  type        = string
+  default     = "fast"
 }
 
 variable "ssh_public_key_path" {

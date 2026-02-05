@@ -21,6 +21,10 @@ Terraform конфигурация для автоматического раз�
    - K6 - инструмент для нагрузочного тестирования (через Docker)
    - **Имеет внешний IP** для доступа и тестирования
 
+### Хранилище данных (S3/MinIO) на быстром диске
+
+У Data Server создаётся **дополнительный том** (`data_volume`), отдельно от загрузочного. В Terraform задаётся размер (`data_volume_size_gb`, по умолчанию 300 GB) и тип диска (`data_volume_disk_type`, по умолчанию `fast`). Ansible при деплое находит второй блок-девайс, монтирует его в `/data` и создаёт каталоги `/data/minio`, `/data/postgres`, `/data/nessie`. Docker Compose override привязывает эти пути к контейнерам: **данные MinIO (S3), Postgres и Nessie хранятся на этом выделенном томе.** Чтобы гарантированно использовать быстрый диск (например NVMe) именно для данных, задайте `data_volume_disk_type = "fast"` в `terraform.tfvars` (или оставьте по умолчанию).
+
 ## Prerequisites
 
 1. [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.0
@@ -522,7 +526,8 @@ terraform destroy
 | `environment_name` | Суффикс для имен ресурсов | `iceberg-test` |
 | `region` | Регион Selectel | - (обязательно) |
 | `availability_zone` | AZ в регионе | `ru-9a` |
-| `disk_type` | Тип диска (fast/universal/basic/basic_hdd) | `fast` |
+| `disk_type` | Тип диска загрузочных томов (fast/universal/basic/basic_hdd) | `fast` |
+| `data_volume_disk_type` | Тип диска для data-тома (MinIO/S3, Postgres, Nessie) | `fast` |
 | `data_flavor_id` | Flavor ID для Data Server | - (обязательно) |
 | `load_flavor_id` | Flavor ID для Load Test Server | - (обязательно) |
 | `data_volume_size_gb` | Размер data-тома для Data Server (GB) | `300` |
