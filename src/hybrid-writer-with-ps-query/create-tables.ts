@@ -404,7 +404,7 @@ export async function createAllTables(
       WHERE constraint_name = 'fk_bonus_registry_balance_check_saga'
       AND table_name = 'bonus_registry_balance_check'
     `);
-    
+
     if (fkExists[0]?.count === 0) {
       await postgres.sql.unsafe(`
         ALTER TABLE ${escapePostgresIdentifier("bonus_registry_balance_check")}
